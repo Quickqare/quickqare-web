@@ -1,7 +1,11 @@
 import axios from "axios";
 
-// Empty baseURL — all /api/* requests go through the Vite proxy to http://168.144.64.189:4000
-const client = axios.create({ baseURL: "" });
+const API_BASE_URL =
+  (import.meta as unknown as { env: Record<string, string | undefined> }).env
+    .VITE_API_BASE_URL || "";
+
+// Production uses the public API domain; local dev can still rely on the Vite proxy.
+const client = axios.create({ baseURL: API_BASE_URL });
 
 client.interceptors.request.use((config) => {
   const raw = localStorage.getItem("qq_web_token");
