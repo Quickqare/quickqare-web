@@ -5,6 +5,7 @@ import Navbar from "./components/Navbar";
 import HomePage from "./pages/HomePage";
 import MyBookingsPage from "./pages/MyBookingsPage";
 import ProfilePage from "./pages/ProfilePage";
+import PolicyPage from "./pages/PolicyPage";
 import LoginModal from "./components/LoginModal";
 
 export default function App() {
@@ -33,6 +34,9 @@ export default function App() {
             path="/profile"
             element={user ? <ProfilePage /> : <Navigate to="/" replace />}
           />
+          <Route path="/privacy-policy" element={<PolicyPage />} />
+          <Route path="/terms" element={<PolicyPage />} />
+          <Route path="/refund-policy" element={<PolicyPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

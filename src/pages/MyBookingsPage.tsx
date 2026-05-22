@@ -30,6 +30,7 @@ type Booking = {
   discountAmount?: number;
   couponCode?: string;
   couponDiscountAmount?: number;
+  platformFeeAmount?: number;
   gstAmount?: number;
   totalAmount: number;
   // Payment
@@ -103,7 +104,8 @@ function serviceCategoryLabel(b: Booking): string | null {
 /* ── Booking Detail Panel ── */
 function BookingDetail({ b }: { b: Booking }) {
   const hasDiscount = (b.discountAmount ?? 0) > 0 || (b.couponDiscountAmount ?? 0) > 0;
-  const hasGst = (b.gstAmount ?? 0) > 0;
+  const feesAndTaxes = (b.platformFeeAmount ?? 0) + (b.gstAmount ?? 0);
+  const hasFeesAndTaxes = feesAndTaxes > 0;
   const discount = (b.discountAmount ?? 0) + (b.couponDiscountAmount ?? 0);
 
   return (
@@ -166,10 +168,10 @@ function BookingDetail({ b }: { b: Booking }) {
               <span>−₹{discount.toLocaleString("en-IN")}</span>
             </div>
           )}
-          {hasGst && (
+          {hasFeesAndTaxes && (
             <div className="flex justify-between text-muted">
-              <span>GST</span>
-              <span>₹{b.gstAmount?.toLocaleString("en-IN")}</span>
+              <span>Fees and Taxes</span>
+              <span>₹{feesAndTaxes.toLocaleString("en-IN")}</span>
             </div>
           )}
           <div className="flex justify-between font-bold text-ink border-t border-border pt-1 mt-1">
