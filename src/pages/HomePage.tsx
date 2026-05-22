@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import client from "../api/client";
 import BookingModal from "../components/BookingModal";
@@ -554,8 +555,15 @@ export default function HomePage({ onLoginClick }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="border-t border-border py-5 px-4 text-center text-xs text-muted mt-8">
-          © {new Date().getFullYear()} QuickQare. All rights reserved.
+        <div className="border-t border-border py-6 px-4 mt-8">
+          <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-muted">
+            <span>© {new Date().getFullYear()} QuickQare. All rights reserved.</span>
+            <div className="flex items-center gap-5">
+              <Link to="/privacy-policy" className="hover:text-ink transition-colors">Privacy Policy</Link>
+              <Link to="/terms" className="hover:text-ink transition-colors">Terms & Conditions</Link>
+              <Link to="/refund-policy" className="hover:text-ink transition-colors">Refund Policy</Link>
+            </div>
+          </div>
         </div>
       </div>
 
