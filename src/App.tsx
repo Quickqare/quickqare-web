@@ -7,6 +7,7 @@ import MyBookingsPage from "./pages/MyBookingsPage";
 import ProfilePage from "./pages/ProfilePage";
 import PolicyPage from "./pages/PolicyPage";
 import LoginModal from "./components/LoginModal";
+import Footer from "./components/Footer";
 
 export default function App() {
   const { user, loading } = useAuth();
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
+      <Footer />
       {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
     </>
   );
