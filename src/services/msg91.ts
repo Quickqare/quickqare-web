@@ -81,8 +81,8 @@ export const sendOtp = async (phone: string): Promise<{ reqId?: string }> => {
     throw new Error(result?.message || "Failed to send OTP");
   }
 
-  // MSG91 returns reqId at top level OR nested under data depending on widget version
-  const reqId = result?.reqId ?? result?.data?.reqId ?? undefined;
+  // MSG91 widget returns reqId as `message` when type === "success"
+  const reqId = result?.reqId ?? result?.data?.reqId ?? (result?.type === "success" ? result?.message : undefined) ?? undefined;
   console.log("[MSG91 sendOtp] extracted reqId:", reqId);
   return { ...result, reqId };
 };
