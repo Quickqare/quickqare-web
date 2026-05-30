@@ -75,15 +75,12 @@ export const sendOtp = async (phone: string): Promise<{ reqId?: string }> => {
   const mobile = toInternationalPhone(phone);
   const result = await postWidget("/sendOtpMobile", { identifier: mobile });
 
-  console.log("[MSG91 sendOtp raw response]", JSON.stringify(result, null, 2));
-
   if (result?.type === "error") {
     throw new Error(result?.message || "Failed to send OTP");
   }
 
   // MSG91 widget returns reqId as `message` when type === "success"
   const reqId = result?.reqId ?? result?.data?.reqId ?? (result?.type === "success" ? result?.message : undefined) ?? undefined;
-  console.log("[MSG91 sendOtp] extracted reqId:", reqId);
   return { ...result, reqId };
 };
 
