@@ -175,9 +175,16 @@ export default function HomePage({ onLoginClick }: Props) {
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [bookingDone, setBookingDone] = useState(false);
+  const [offers, setOffers] = useState<any[]>([]);
   const servicesRef = useRef<HTMLDivElement>(null);
 
   const loc = useLocation();
+
+  useEffect(() => {
+    client.get("/api/offers").then((res) => {
+      setOffers(Array.isArray(res.data?.offers) ? res.data.offers : []);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     client.get("/api/services")
@@ -354,6 +361,90 @@ export default function HomePage({ onLoginClick }: Props) {
                   <span className="text-[11px] font-semibold text-ink whitespace-nowrap">{t.label}</span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* ── Offers section ── */}
+          {offers.length > 0 && !search && (
+            <div className="mt-6">
+              <h2 className="text-[17px] font-extrabold text-ink tracking-tight mb-3">Offers & Deals</h2>
+              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
+                {offers.map((offer) => {
+                  const isBundle = offer.type === "bundle";
+                  const isCoupon = offer.type === "coupon";
+                  const accentColor = isBundle ? "#22A06B" : isCoupon ? "#7C3AED" : "#2563EB";
+                  const bgColor = isBundle ? "#F0FDF4" : isCoupon ? "#F5F3FF" : "#EFF6FF";
+                  const borderColor = isBundle ? "#BBF7D0" : isCoupon ? "#DDD6FE" : "#BFDBFE";
+                  const savings = isBundle && offer.originalPrice && offer.bundlePrice
+                    ? offer.originalPrice - offer.bundlePrice : null;
+
+                  return (
+                    <div
+                      key={offer._id}
+                      className="shrink-0 w-64 rounded-2xl border flex overflow-hidden"
+                      style={{ backgroundColor: bgColor, borderColor }}
+                    >
+                      {/* Accent strip */}
+                      <div className="w-1 shrink-0" style={{ backgroundColor: accentColor }} />
+
+                      <div className="p-3.5 flex-1">
+                        {/* Title row */}
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <p className="font-bold text-[13px] text-ink leading-snug flex-1">{offer.title}</p>
+                          {offer.badgeText && (
+                            <span
+                              className="text-white text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0"
+                              style={{ backgroundColor: offer.badgeColor || accentColor }}
+                            >
+                              {offer.badgeText}
+                            </span>
+                          )}
+                        </div>
+
+                        {offer.tagline && (
+                          <p className="text-[11px] text-muted mb-2">{offer.tagline}</p>
+                        )}
+
+                        {/* Bundle pricing */}
+                        {isBundle && offer.bundlePrice != null && (
+                          <div className="flex items-center gap-2 mb-2.5">
+                            <span className="font-extrabold text-base" style={{ color: accentColor }}>₹{offer.bundlePrice}</span>
+                            {offer.originalPrice != null && (
+                              <span className="text-xs text-muted line-through">₹{offer.originalPrice}</span>
+                            )}
+                            {savings != null && savings > 0 && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: accentColor + "20", color: accentColor }}>
+                                Save ₹{savings}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Coupon code box */}
+                        {isCoupon && offer.couponCode && (
+                          <div
+                            className="flex items-center justify-center rounded-lg border border-dashed py-2 mb-2"
+                            style={{ borderColor: accentColor + "60", backgroundColor: accentColor + "10" }}
+                          >
+                            <span className="font-extrabold text-sm tracking-widest" style={{ color: accentColor }}>
+                              {offer.couponCode}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Info description */}
+                        {!isBundle && !isCoupon && offer.description && (
+                          <p className="text-[11px] text-muted leading-relaxed line-clamp-2 mb-1">{offer.description}</p>
+                        )}
+
+                        {isCoupon && (
+                          <p className="text-[10px] text-muted">Apply this code at checkout</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
