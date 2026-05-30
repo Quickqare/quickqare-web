@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Default brand tokens — overridden at runtime by admin theme via JS */
+:root {
+  --color-primary:      34 160 107;   /* #22A06B */
+  --color-primary-dark: 21 128 61;    /* #15803D */
+  --color-ink:          10 10 10;     /* #0A0A0A */
+  --color-bg:           245 245 245;  /* #F5F5F5 */
+}
+
 @layer base {
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }

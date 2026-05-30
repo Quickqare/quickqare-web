@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import client from "../api/client";
 import BookingModal from "../components/BookingModal";
+import { useAppConfig } from "../hooks/useAppConfig";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type CategoryObj = { _id: string; name: string; slug?: string; imageUrl?: string };
@@ -176,6 +177,27 @@ export default function HomePage({ onLoginClick }: Props) {
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [bookingDone, setBookingDone] = useState(false);
   const [offers, setOffers] = useState<any[]>([]);
+  const [banners, setBanners] = useState<any[]>([]);
+  const [bannerIndex, setBannerIndex] = useState(0);
+  const { emergency, homeTheme } = useAppConfig();
+
+  // Map category slug → admin-uploaded icon URL (fallback to SVG if empty)
+  const getAdminIconUrl = (slug: string): string => {
+    const k = slug.toLowerCase();
+    const ci = homeTheme.categoryIcons;
+    if (k.includes("ac")) return ci.acRepair ?? "";
+    if (k.includes("plumb")) return ci.plumbing ?? "";
+    if (k.includes("mehend") || k.includes("mehndi")) return ci.mehendi ?? "";
+    if (k.includes("electric")) return ci.electrician ?? "";
+    return "";
+  };
+
+  const renderCatIcon = (slug: string, size: number, color: string) => {
+    const url = getAdminIconUrl(slug);
+    if (url) return <img src={url} alt="" style={{ width: size, height: size, objectFit: "contain" }} />;
+    const Icon = getCatIcon(slug);
+    return <Icon size={size} color={color} />;
+  };
   const servicesRef = useRef<HTMLDivElement>(null);
 
   const loc = useLocation();
@@ -184,7 +206,19 @@ export default function HomePage({ onLoginClick }: Props) {
     client.get("/api/offers").then((res) => {
       setOffers(Array.isArray(res.data?.offers) ? res.data.offers : []);
     }).catch(() => {});
+    client.get("/api/banners?placement=home").then((res) => {
+      const rows = Array.isArray(res.data?.banners) ? res.data.banners : [];
+      setBanners(rows.filter((b: any) => b.isActive !== false && b.imageUrl));
+    }).catch(() => {});
   }, []);
+
+  // Banner auto-rotate — respects per-banner displayDurationSeconds
+  useEffect(() => {
+    if (banners.length < 2) return;
+    const duration = (banners[bannerIndex]?.displayDurationSeconds ?? 5) * 1000;
+    const t = setTimeout(() => setBannerIndex((i) => (i + 1) % banners.length), duration);
+    return () => clearTimeout(t);
+  }, [banners, bannerIndex]);
 
   useEffect(() => {
     client.get("/api/services")
@@ -310,6 +344,61 @@ export default function HomePage({ onLoginClick }: Props) {
       <div className="bg-bg min-h-screen">
         <div className="max-w-6xl mx-auto px-4 py-6">
 
+          {/* Emergency banner */}
+          {(emergency.emergencyLockdown || emergency.bookingsDisabled || emergency.paymentsFreezed) && (
+            <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3 mb-5 flex items-center gap-3">
+              <span className="text-xl shrink-0">🚫</span>
+              <p className="text-sm font-semibold text-red-700">
+                {emergency.emergencyLockdown
+                  ? "Platform is under maintenance. Please try again later."
+                  : emergency.bookingsDisabled
+                  ? "Bookings are temporarily unavailable. Please try again later."
+                  : "Payments are temporarily frozen. Please try again later."}
+              </p>
+            </div>
+          )}
+
+          {/* Banner carousel */}
+          {banners.length > 0 && (
+            <div className="relative w-full rounded-2xl overflow-hidden mb-5" style={{ aspectRatio: "3/1" }}>
+              {banners.map((b, i) => {
+                const inner = (
+                  <>
+                    <img src={b.imageUrl} alt={b.title || ""} className="w-full h-full object-cover" />
+                    {b.title && (
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-4">
+                        <p className="text-white font-bold text-base">{b.title}</p>
+                      </div>
+                    )}
+                  </>
+                );
+                return (
+                  <div
+                    key={b._id}
+                    className={`absolute inset-0 transition-opacity duration-700 ${i === bannerIndex ? "opacity-100" : "opacity-0"}`}
+                  >
+                    {b.linkUrl ? (
+                      <a href={b.linkUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                        {inner}
+                      </a>
+                    ) : inner}
+                  </div>
+                );
+              })}
+              {banners.length > 1 && (
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
+                  {banners.map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setBannerIndex(i)}
+                      className={`w-1.5 h-1.5 rounded-full transition-all ${i === bannerIndex ? "bg-white w-4" : "bg-white/50"}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Category icon quick-row */}
           <h2 className="text-[17px] font-extrabold text-ink tracking-tight mb-4">What do you need?</h2>
           <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
@@ -321,7 +410,6 @@ export default function HomePage({ onLoginClick }: Props) {
                   </div>
                 ))
               : filteredCategories.map((cat) => {
-                  const Icon = getCatIcon(cat.slug);
                   const active = selectedCatId === cat.id;
                   return (
                     <button
@@ -334,7 +422,7 @@ export default function HomePage({ onLoginClick }: Props) {
                           ? "bg-ink shadow-lg scale-110 animate-float"
                           : "bg-white shadow-sm hover:-translate-y-2 hover:scale-110 hover:shadow-md"
                       }`}>
-                        <Icon size={26} color={active ? "#FFFFFF" : "#0A0A0A"}/>
+                        {renderCatIcon(cat.slug, 26, active ? "#FFFFFF" : "#0A0A0A")}
                       </div>
                       <span className={`text-[11px] font-bold text-center leading-tight tracking-tight transition-colors ${
                         active ? "text-ink" : "text-[#6B7280] group-hover:text-ink"
@@ -475,7 +563,6 @@ export default function HomePage({ onLoginClick }: Props) {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {filteredCategories.map((cat, index) => {
-                  const Icon = getCatIcon(cat.slug);
                   return (
                     <button
                       key={cat.id}
@@ -493,7 +580,7 @@ export default function HomePage({ onLoginClick }: Props) {
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center bg-gray-50">
-                            <Icon size={64} color="#D1D5DB"/>
+                            {renderCatIcon(cat.slug, 64, "#D1D5DB")}
                           </div>
                         )}
                         {/* Gradient overlay */}
@@ -551,7 +638,6 @@ export default function HomePage({ onLoginClick }: Props) {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                   {catServices.map((svc) => {
-                    const Icon = getCatIcon(catSlug(svc.category));
                     const img = svc.imageUrl?.trim() || "";
                     return (
                       <div key={svc._id} className="bg-white rounded-3xl overflow-hidden shadow-[0_2px_20px_rgba(0,0,0,0.06)] hover:shadow-[0_12px_40px_rgba(0,0,0,0.14)] hover:-translate-y-1 transition-all duration-300 flex flex-col group">
@@ -571,7 +657,7 @@ export default function HomePage({ onLoginClick }: Props) {
                           ) : null}
                           {/* Fallback icon — shown when no image or image fails */}
                           <div className={`absolute inset-0 flex items-center justify-center ${img ? "hidden" : ""}`}>
-                            <Icon size={52} color="#D1D5DB"/>
+                            {renderCatIcon(catSlug(svc.category), 52, "#D1D5DB")}
                           </div>
                           {/* Duration chip */}
                           {svc.duration && (

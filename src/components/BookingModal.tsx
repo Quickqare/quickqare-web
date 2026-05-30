@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import client from "../api/client";
+import { useAppConfig } from "../hooks/useAppConfig";
 
 type Service = {
   _id: string;
@@ -45,10 +46,16 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState("");
 
+  const [availableSlotTimes, setAvailableSlotTimes] = useState<string[] | null>(null); // null = loading/unknown
+  const [slotsLoading, setSlotsLoading] = useState(false);
+
   const [couponInput, setCouponInput] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discount: number } | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState("");
+  const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
+  const [showCoupons, setShowCoupons] = useState(false);
+  const [couponsLoading, setCouponsLoading] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -65,6 +72,36 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
       .catch(() => {})
       .finally(() => setAddressesLoading(false));
   }, [isLoggedIn]);
+
+  // Fetch available slots whenever date or pincode changes
+  const fetchSlots = useCallback(async (forDate: string, forPincode: string) => {
+    setSlotsLoading(true);
+    setTime(""); // reset selection when date changes
+    try {
+      const res = await client.post("/api/booking/available-slots", {
+        date: forDate,
+        services: [{ serviceId: service._id, quantity: 1, price: service.price }],
+        pincode: forPincode || undefined,
+      });
+      const slots: any[] = Array.isArray(res.data?.slots) ? res.data.slots : [];
+      setAvailableSlotTimes(slots.map((s) => String(s?.time || s || "").trim()).filter(Boolean));
+    } catch {
+      setAvailableSlotTimes(null); // null = fall back to showing all slots
+    } finally {
+      setSlotsLoading(false);
+    }
+  }, [service._id, service.price]);
+
+  useEffect(() => {
+    fetchSlots(date, pincode);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
+
+  // Re-fetch when pincode is filled in (zone-based availability)
+  useEffect(() => {
+    if (pincode.length === 6) fetchSlots(date, pincode);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pincode]);
 
   const applyAddress = (addr: any) => {
     setAddress(addr.address || "");
@@ -111,8 +148,17 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
     );
   };
 
+  const { pricing } = useAppConfig();
   const discount = appliedCoupon?.discount ?? 0;
-  const displayPrice = Math.max(service.price - discount, 0);
+  const taxableAmount = Math.max(service.price - discount, 0);
+  const platformFeeAmount = Math.round(
+    (taxableAmount * (pricing.platformFeePercent ?? 0)) / 100 +
+    (pricing.platformFeeFlatInr ?? 0)
+  );
+  const gstAmount = Math.round(
+    ((taxableAmount + platformFeeAmount) * (pricing.taxPercent ?? 18)) / 100
+  );
+  const totalPayable = taxableAmount + platformFeeAmount + gstAmount;
 
   const applyCoupon = async () => {
     const code = couponInput.trim().toUpperCase();
@@ -143,6 +189,22 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
     setAppliedCoupon(null);
     setCouponInput("");
     setCouponError("");
+  };
+
+  const loadAvailableCoupons = async () => {
+    if (availableCoupons.length) { setShowCoupons((v) => !v); return; }
+    setShowCoupons(true);
+    setCouponsLoading(true);
+    try {
+      const res = await client.get(`/api/coupons/available?amount=${service.price}&serviceIds=${service._id}`);
+      setAvailableCoupons(Array.isArray(res.data?.coupons) ? res.data.coupons : []);
+    } catch { } finally { setCouponsLoading(false); }
+  };
+
+  const applyFromList = (code: string) => {
+    setCouponInput(code);
+    setShowCoupons(false);
+    applyCoupon();
   };
 
   const handleBook = async () => {
@@ -248,22 +310,45 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
 
             {/* Time slots */}
             <div>
-              <label className="block text-sm font-medium text-ink mb-1.5">Time Slot</label>
-              <div className="grid grid-cols-3 gap-2">
-                {TIME_SLOTS.map((t) => (
-                  <button
-                    key={t.value}
-                    onClick={() => setTime(t.value)}
-                    className={`py-2 px-2 text-xs font-medium rounded-lg border transition ${
-                      time === t.value
-                        ? "border-primary bg-primary text-white"
-                        : "border-border text-ink hover:border-primary"
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-medium text-ink">Time Slot</label>
+                {slotsLoading && (
+                  <span className="text-xs text-muted flex items-center gap-1">
+                    <span className="w-3 h-3 border border-primary border-t-transparent rounded-full animate-spin inline-block" />
+                    Checking availability…
+                  </span>
+                )}
               </div>
+              <div className="grid grid-cols-3 gap-2">
+                {TIME_SLOTS.map((t) => {
+                  const isAvailable = availableSlotTimes === null || availableSlotTimes.includes(t.value);
+                  const isSelected = time === t.value;
+                  return (
+                    <button
+                      key={t.value}
+                      onClick={() => isAvailable && setTime(t.value)}
+                      disabled={!isAvailable}
+                      className={`py-2 px-2 text-xs font-medium rounded-lg border transition relative ${
+                        isSelected
+                          ? "border-primary bg-primary text-white"
+                          : isAvailable
+                          ? "border-border text-ink hover:border-primary"
+                          : "border-border bg-gray-50 text-gray-300 cursor-not-allowed"
+                      }`}
+                    >
+                      {t.label}
+                      {!isAvailable && (
+                        <span className="absolute inset-0 flex items-center justify-center">
+                          <span className="text-[9px] text-gray-400 font-semibold">Full</span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {availableSlotTimes !== null && availableSlotTimes.length === 0 && (
+                <p className="text-xs text-red-500 mt-2">No slots available for this date. Try another date.</p>
+              )}
             </div>
 
             {/* ── Address section ── */}
@@ -411,6 +496,38 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
                 </div>
               )}
               {couponError && <p className="text-red-500 text-xs mt-1.5">{couponError}</p>}
+
+              {/* Available coupons toggle */}
+              {!appliedCoupon && (
+                <div>
+                  <button onClick={loadAvailableCoupons} className="text-xs text-primary font-semibold mt-2 hover:underline">
+                    {showCoupons ? "▲ Hide coupons" : "▼ View available coupons"}
+                  </button>
+                  {showCoupons && (
+                    <div className="mt-2 space-y-2">
+                      {couponsLoading ? (
+                        <div className="h-8 bg-gray-100 rounded-lg animate-pulse" />
+                      ) : availableCoupons.length === 0 ? (
+                        <p className="text-xs text-muted py-1">No coupons available for this service.</p>
+                      ) : availableCoupons.map((c) => (
+                        <div key={c._id || c.code} className="flex items-center justify-between bg-gray-50 border border-border rounded-xl px-3 py-2.5">
+                          <div>
+                            <p className="text-xs font-bold text-ink tracking-wide">{c.code}</p>
+                            <p className="text-xs text-muted">{c.displayText}</p>
+                            {c.minOrder > 0 && <p className="text-xs text-muted">Min order ₹{c.minOrder}</p>}
+                          </div>
+                          <button
+                            onClick={() => applyFromList(c.code)}
+                            className="ml-3 shrink-0 text-xs font-semibold text-primary border border-primary rounded-lg px-3 py-1.5 hover:bg-primary hover:text-white transition"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Price summary */}
@@ -422,12 +539,18 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
               {discount > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted">Coupon discount</span>
-                  <span className="font-semibold text-green-600">−₹{discount}</span>
+                  <span className="font-semibold text-green-600">−₹{discount.toLocaleString("en-IN")}</span>
+                </div>
+              )}
+              {(platformFeeAmount + gstAmount) > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">Fees & Taxes</span>
+                  <span className="font-semibold text-ink">₹{(platformFeeAmount + gstAmount).toLocaleString("en-IN")}</span>
                 </div>
               )}
               <div className="flex justify-between text-sm border-t border-gray-200 pt-1.5">
-                <span className="font-bold text-ink">Total (excl. taxes)</span>
-                <span className="font-extrabold text-ink">₹{displayPrice.toLocaleString("en-IN")}</span>
+                <span className="font-bold text-ink">Total Payable</span>
+                <span className="font-extrabold text-primary">₹{totalPayable.toLocaleString("en-IN")}</span>
               </div>
             </div>
 
