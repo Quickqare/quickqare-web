@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import client from "../api/client";
 
@@ -60,6 +60,7 @@ const STATUS_MAP: Record<string, StatusCfg> = {
   IN_PROGRESS:          { bg: "bg-orange-50",  text: "text-orange-700", dot: "bg-orange-500", label: "In Progress" },
   COMPLETED:            { bg: "bg-green-50",   text: "text-green-700",  dot: "bg-green-500",  label: "Completed" },
   CANCELLED:            { bg: "bg-red-50",     text: "text-red-700",    dot: "bg-red-400",    label: "Cancelled" },
+  NEEDS_RESCHEDULING:   { bg: "bg-blue-50",   text: "text-blue-700",   dot: "bg-blue-400",   label: "⚠️ Reschedule Required" },
 };
 
 const NON_CANCELLABLE = new Set(["IN_PROGRESS", "COMPLETED", "CANCELLED"]);

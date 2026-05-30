@@ -73,31 +73,39 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
       .finally(() => setAddressesLoading(false));
   }, [isLoggedIn]);
 
-  // Fetch available slots whenever date or pincode changes
+  // Fetch available slots — only when we have a valid 6-digit pincode
   const fetchSlots = useCallback(async (forDate: string, forPincode: string) => {
+    if (!forPincode || forPincode.length !== 6) {
+      // No pincode yet — show all slots as selectable, don't hit the backend
+      setAvailableSlotTimes(null);
+      return;
+    }
     setSlotsLoading(true);
-    setTime(""); // reset selection when date changes
     try {
       const res = await client.post("/api/booking/available-slots", {
         date: forDate,
         services: [{ serviceId: service._id, quantity: 1, price: service.price }],
-        pincode: forPincode || undefined,
+        pincode: forPincode,
       });
       const slots: any[] = Array.isArray(res.data?.slots) ? res.data.slots : [];
       setAvailableSlotTimes(slots.map((s) => String(s?.time || s || "").trim()).filter(Boolean));
     } catch {
-      setAvailableSlotTimes(null); // null = fall back to showing all slots
+      setAvailableSlotTimes(null); // API failed → show all slots
     } finally {
       setSlotsLoading(false);
     }
   }, [service._id, service.price]);
 
+  // Re-fetch slots when date changes (only if pincode already known)
   useEffect(() => {
-    fetchSlots(date, pincode);
+    if (pincode.length === 6) {
+      setTime("");
+      fetchSlots(date, pincode);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
-  // Re-fetch when pincode is filled in (zone-based availability)
+  // Fetch slots once pincode becomes valid (GPS fill or manual entry)
   useEffect(() => {
     if (pincode.length === 6) fetchSlots(date, pincode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -348,6 +356,12 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
               </div>
               {availableSlotTimes !== null && availableSlotTimes.length === 0 && (
                 <p className="text-xs text-red-500 mt-2">No slots available for this date. Try another date.</p>
+              )}
+              {pincode.length !== 6 && (
+                <p className="text-xs text-muted mt-2 flex items-center gap-1.5">
+                  <span>📍</span>
+                  Add your location below to check live slot availability for your area.
+                </p>
               )}
             </div>
 

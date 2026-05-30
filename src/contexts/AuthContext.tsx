@@ -1,9 +1,5 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import client, { setToken } from "../api/client";
-import {
-  sendOtp as msg91SendOtp,
-  verifyOtp as msg91VerifyOtp,
-} from "../services/msg91";
 
 type User = { _id: string; name: string; phone: string; email?: string; gender?: string };
 
@@ -24,7 +20,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setTokenState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const reqIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const t = localStorage.getItem("qq_web_token");
@@ -46,18 +41,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const sendOtp = async (phone: string) => {
     try {
-      const result = await msg91SendOtp(phone);
-      reqIdRef.current = result?.reqId ?? null;
+      await client.post("/api/auth/send-otp", { phone });
       return { success: true, message: "" };
     } catch (e: any) {
-      return { success: false, message: e.message ?? "Failed to send OTP" };
+      return { success: false, message: e.response?.data?.message ?? e.message ?? "Failed to send OTP" };
     }
   };
 
   const verifyOtp = async (phone: string, otp: string) => {
     try {
-      const { accessToken } = await msg91VerifyOtp(otp, reqIdRef.current);
-      const res = await client.post("/api/auth/msg91/exchange", { phone, accessToken });
+      const res = await client.post("/api/auth/verify-otp", { phone, otp });
       if (res.data?.success) {
         const t = res.data.token;
         const u = res.data.user;
@@ -66,7 +59,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(u);
         localStorage.setItem("qq_web_token", t);
         localStorage.setItem("qq_web_user", JSON.stringify(u));
-        reqIdRef.current = null;
         return { success: true, message: "" };
       }
       return { success: false, message: res.data?.message ?? "Verification failed" };

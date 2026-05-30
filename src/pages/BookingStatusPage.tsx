@@ -46,7 +46,7 @@ const STATUS_STEPS: { status: BookingStatus; label: string; icon: string }[] = [
 const ORDER: Record<string, number> = {
   PENDING_PAYMENT: 0, SEARCHING: 1, QUEUED: 1, PENDING_ASSIGNMENT: 1,
   ASSIGNED: 2, CONFIRMED: 2, PARTNER_ACCEPTED: 2, NO_PARTNER_AVAILABLE: 1,
-  ON_THE_WAY: 3, ARRIVED: 4, IN_PROGRESS: 5, COMPLETED: 6, CANCELLED: -1,
+  ON_THE_WAY: 3, ARRIVED: 4, IN_PROGRESS: 5, COMPLETED: 6, CANCELLED: -1, NEEDS_RESCHEDULING: -1,
 };
 
 function fmtDate(d: string) {
@@ -68,6 +68,9 @@ export default function BookingStatusPage() {
   const [cancelState, setCancelState] = useState<"idle" | "confirming" | "cancelling">("idle");
   const [showEstimate, setShowEstimate] = useState(false);
   const [estimateAction, setEstimateAction] = useState<"approving" | "rejecting" | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleTime, setRescheduleTime] = useState("");
+  const [rescheduling, setRescheduling] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
   // Fetch booking
@@ -98,6 +101,7 @@ export default function BookingStatusPage() {
         status: data.status ?? prev.status,
         etaMinutes: data.etaMinutes ?? prev.etaMinutes,
         partner: data.partner ?? prev.partner,
+        rescheduleReason: data.rescheduleReason ?? prev.rescheduleReason,
       } : prev);
     });
 
@@ -144,7 +148,24 @@ export default function BookingStatusPage() {
   );
 
   const currentOrder = ORDER[booking.status] ?? 0;
-  const isCancellable = !["IN_PROGRESS", "COMPLETED", "CANCELLED"].includes(booking.status);
+  const isCancellable = !["IN_PROGRESS", "COMPLETED", "CANCELLED", "NEEDS_RESCHEDULING"].includes(booking.status);
+  const isNeedsRescheduling = booking.status === "NEEDS_RESCHEDULING";
+
+  const handleReschedule = async () => {
+    if (!rescheduleDate || !rescheduleTime) { alert("Please select a date and time."); return; }
+    setRescheduling(true);
+    try {
+      await client.patch(`/api/booking/user/reschedule/${bookingId}`, {
+        scheduledDate: rescheduleDate,
+        scheduledTime: rescheduleTime,
+      });
+      setBooking((prev) => prev ? { ...prev, status: "SEARCHING" } : prev);
+    } catch (e: any) {
+      alert(e.response?.data?.message || "Reschedule failed. Please try again.");
+    } finally {
+      setRescheduling(false);
+    }
+  };
   const serviceName = booking.services?.length
     ? (booking.services.length === 1 ? booking.services[0].name : `${booking.services[0].name} +${booking.services.length - 1} more`)
     : booking.serviceCategory ?? "Service";
@@ -175,6 +196,50 @@ export default function BookingStatusPage() {
         {booking.status === "ON_THE_WAY" && booking.etaMinutes && (
           <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-2.5 text-sm text-orange-700 font-semibold">
             🚗 Partner arriving in ~{booking.etaMinutes} min
+          </div>
+        )}
+
+        {/* Reschedule required banner */}
+        {isNeedsRescheduling && (
+          <div className="mt-3 bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <p className="text-sm font-bold text-blue-800 mb-1">📅 Rescheduling Required</p>
+            {booking.rescheduleReason && (
+              <p className="text-sm text-blue-700 mb-3 leading-relaxed">
+                {booking.rescheduleReason}, we are unable to complete your booking at the scheduled time.
+                We'd like to reschedule your service at no extra charge.
+              </p>
+            )}
+            <p className="text-xs font-semibold text-blue-600 mb-2">Select a new date and time:</p>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="date"
+                className="flex-1 border border-blue-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                value={rescheduleDate}
+                min={new Date().toISOString().split("T")[0]}
+                onChange={(e) => setRescheduleDate(e.target.value)}
+              />
+              <select
+                className="flex-1 border border-blue-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                value={rescheduleTime}
+                onChange={(e) => setRescheduleTime(e.target.value)}
+              >
+                <option value="">Select time</option>
+                {["08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00"].map((t) => (
+                  <option key={t} value={t}>
+                    {Number(t.split(":")[0]) >= 12
+                      ? `${Number(t.split(":")[0]) === 12 ? 12 : Number(t.split(":")[0]) - 12}:00 PM`
+                      : `${Number(t.split(":")[0])}:00 AM`}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={handleReschedule}
+              disabled={rescheduling || !rescheduleDate || !rescheduleTime}
+              className="w-full py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition disabled:opacity-50"
+            >
+              {rescheduling ? "Rescheduling…" : "Confirm New Slot"}
+            </button>
           </div>
         )}
 
