@@ -10,7 +10,8 @@ const SOCKET_URL = ((import.meta as any).env.VITE_API_BASE_URL || "")
 type BookingStatus =
   | "PENDING_PAYMENT" | "SEARCHING" | "QUEUED" | "PENDING_ASSIGNMENT"
   | "ASSIGNED" | "CONFIRMED" | "PARTNER_ACCEPTED" | "NO_PARTNER_AVAILABLE"
-  | "ON_THE_WAY" | "ARRIVED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+  | "ON_THE_WAY" | "ARRIVED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
+  | "NEEDS_RESCHEDULING";
 
 type Booking = {
   _id: string;
@@ -32,6 +33,7 @@ type Booking = {
   refundAmount?: number;
   refundStatus?: string;
   payment?: { status: string };
+  rescheduleReason?: string;
 };
 
 const STATUS_STEPS: { status: BookingStatus; label: string; icon: string }[] = [
