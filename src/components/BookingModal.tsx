@@ -8,7 +8,7 @@ type Service = {
   price: number;
   category?: { name: string } | string | null;
 };
-type Props = { service: Service; onClose: () => void; onSuccess: () => void };
+type Props = { service: Service; onClose: () => void; onSuccess: (bookingId: string) => void };
 
 const TIME_SLOTS: { value: string; label: string }[] = [
   { value: "08:00", label: "8:00 AM" },
@@ -264,7 +264,7 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
               razorpay_order_id: response.razorpay_order_id,
               razorpay_signature: response.razorpay_signature,
             });
-            onSuccess();
+            onSuccess(bookingId);
           } catch {
             setError("Payment verification failed. Please contact support.");
             setStep("form");

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import client from "../api/client";
 import BookingModal from "../components/BookingModal";
@@ -170,12 +170,12 @@ function useLocation() {
 // ─── Main component ────────────────────────────────────────────────────────────
 export default function HomePage({ onLoginClick }: Props) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
-  const [bookingDone, setBookingDone] = useState(false);
   const [offers, setOffers] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
   const [bannerIndex, setBannerIndex] = useState(0);
@@ -772,20 +772,14 @@ export default function HomePage({ onLoginClick }: Props) {
         <BookingModal
           service={selectedService}
           onClose={() => setSelectedService(null)}
-          onSuccess={() => {
+          onSuccess={(bookingId) => {
             setSelectedService(null);
-            setBookingDone(true);
-            setTimeout(() => setBookingDone(false), 4000);
+            navigate(`/bookings/${bookingId}`);
           }}
         />
       )}
 
       {/* ── Success toast ── */}
-      {bookingDone && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-primary text-white px-6 py-3 rounded-xl shadow-lg text-sm font-medium z-50 whitespace-nowrap">
-          Booking confirmed! Check My Bookings.
-        </div>
-      )}
     </>
   );
 }
