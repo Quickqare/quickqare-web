@@ -156,7 +156,7 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
     } finally {
       setSlotsLoading(false);
     }
-  }, [service._id, service.price]);
+  }, [service._id, isMehendi, handsCount]);
 
   // Re-fetch slots when date changes (only if pincode already known)
   useEffect(() => {
@@ -172,6 +172,15 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
     if (pincode.length === 6) fetchSlots(date, pincode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pincode]);
+
+  // Re-fetch slots when hands count changes for mehendi (capacity differs per quantity)
+  useEffect(() => {
+    if (isMehendi && pincode.length === 6) {
+      setTime("");
+      fetchSlots(date, pincode);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handsCount]);
 
   const applyAddress = (addr: any) => {
     setAddress(addr.address || "");
