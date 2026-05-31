@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import client from "../api/client";
 import { useAppConfig } from "../hooks/useAppConfig";
+import { getSavedLocation } from "../pages/HomePage";
 
 type Service = {
   _id: string;
@@ -25,6 +26,38 @@ const TIME_SLOTS: { value: string; label: string }[] = [
 ];
 
 const LABEL_ICONS: Record<string, string> = { Home: "🏠", Work: "💼", Other: "📍" };
+
+// ─── Mehendi hands pricing (mirrors mobile mehendiPricing.ts) ─────────────────
+const FEET_NAMES = new Set(["feet","basic feet","ankle","above ankle","mid leg","below knee"]);
+
+function getMehendiPricingKey(name: string): string | null {
+  const n = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (n.includes("minimal mehendi"))              return "minimal";
+  if (n.includes("palm length mehendi"))          return "palm";
+  if (n.includes("bangle length mehendi"))        return "bangle";
+  if (n.includes("mid length mehendi"))           return "mid";
+  if (n.includes("elbow length bridal mehendi"))  return "elbow_bridal";
+  if (n.includes("above elbow bridal mehendi"))   return "above_elbow_bridal";
+  return null;
+}
+
+function getMehendiHandsPrice(key: string | null, hands: number): number | null {
+  const q = Math.max(hands, 1);
+  if (key === "minimal")           return [0,399,699,999,1199][q] ?? q * 299;
+  if (key === "palm")              return [0,499,798,1149,1499][q] ?? q * 399;
+  if (key === "bangle")            return [0,799,1199,1699,2199][q] ?? Math.round(q * 599 * 0.95);
+  if (key === "mid")               return [0,999,1499,2099,2599][q] ?? q * 629;
+  if (key === "elbow_bridal")      return [0,1799,3000][q] ?? Math.round(q * 1799 * 0.75);
+  if (key === "above_elbow_bridal")return [0,2000,3500][q] ?? null;
+  return null;
+}
+
+function isMehendiHandService(name: string): boolean {
+  const n = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!n.includes("mehendi")) return false;
+  if (FEET_NAMES.has(n)) return false;
+  return getMehendiPricingKey(name) !== null;
+}
 
 function todayISO() {
   return new Date().toISOString().split("T")[0];
@@ -57,11 +90,34 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
   const [showCoupons, setShowCoupons] = useState(false);
   const [couponsLoading, setCouponsLoading] = useState(false);
 
+  const [addressLabel, setAddressLabel] = useState<"Home" | "Work" | "Other">("Home");
+  const [notServiceable, setNotServiceable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [step, setStep] = useState<"form" | "paying">("form");
 
+  const isMehendi = isMehendiHandService(service.name);
+  const mehendiKey = getMehendiPricingKey(service.name);
+  const [handsCount, setHandsCount] = useState(1);
+  const mehendiPrice = isMehendi ? (getMehendiHandsPrice(mehendiKey, handsCount) ?? service.price * handsCount) : service.price;
+  const mehendiSinglePrice = isMehendi ? (getMehendiHandsPrice(mehendiKey, 1) ?? service.price) : service.price;
+  const mehendiDiscount = isMehendi && handsCount > 1 ? Math.max((mehendiSinglePrice * handsCount) - mehendiPrice, 0) : 0;
+
   const isLoggedIn = Boolean(localStorage.getItem("qq_web_token"));
+
+  // Pre-fill from the location set at homepage prompt. Only prefill address
+  // when GPS was used (coords are non-zero) — a pincode-only entry has no
+  // meaningful address string to show. Pincode always prefills so slot
+  // availability check fires immediately.
+  useEffect(() => {
+    const saved = getSavedLocation();
+    if (!saved) return;
+    const hasGps = saved.latitude !== 0 && saved.longitude !== 0;
+    if (hasGps && saved.address) setAddress(saved.address);
+    if (saved.pincode) setPincode(saved.pincode);
+    if (hasGps) setCoords([saved.longitude, saved.latitude]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch saved addresses on mount (only if logged in)
   useEffect(() => {
@@ -81,16 +137,22 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
       return;
     }
     setSlotsLoading(true);
+    setNotServiceable(false);
     try {
       const res = await client.post("/api/booking/available-slots", {
         date: forDate,
-        services: [{ serviceId: service._id, quantity: 1, price: service.price }],
+        services: [{ serviceId: service._id, quantity: isMehendi ? handsCount : 1 }],
         pincode: forPincode,
       });
       const slots: any[] = Array.isArray(res.data?.slots) ? res.data.slots : [];
       setAvailableSlotTimes(slots.map((s) => String(s?.time || s || "").trim()).filter(Boolean));
-    } catch {
-      setAvailableSlotTimes(null); // API failed → show all slots
+    } catch (err: any) {
+      if (err?.response?.status === 403) {
+        setNotServiceable(true);
+        setAvailableSlotTimes([]);
+      } else {
+        setAvailableSlotTimes(null); // generic error → show all slots
+      }
     } finally {
       setSlotsLoading(false);
     }
@@ -121,7 +183,28 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
     setError("");
   };
 
+  const applyGeocodedLocation = (loc: { address: string; pincode: string }, longitude: number, latitude: number) => {
+    setAddress(loc.address || "");
+    setPincode(loc.pincode || "");
+    setCoords([longitude, latitude]);
+    setError("");
+  };
+
   const handleUseMyLocation = () => {
+    // Check session cache first — avoids a Maps API call if the user already
+    // geocoded their location in this browser session (e.g. from a previous
+    // service modal). Cache key is rounded coords so minor GPS drift reuses it.
+    const cached = sessionStorage.getItem("qq_geo_cache");
+    if (cached) {
+      try {
+        const { loc, lng, lat } = JSON.parse(cached);
+        if (loc?.address && loc?.pincode) {
+          applyGeocodedLocation(loc, lng, lat);
+          return;
+        }
+      } catch { /* corrupt cache — fall through to fresh fetch */ }
+    }
+
     if (!navigator.geolocation) {
       setGpsError("Geolocation not supported by your browser.");
       return;
@@ -135,10 +218,9 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
           const res = await client.get(`/api/maps/reverse?lat=${latitude}&lng=${longitude}`);
           const loc = res.data?.location;
           if (loc) {
-            setAddress(loc.address || "");
-            setPincode(loc.pincode || "");
-            setCoords([longitude, latitude]);
-            setError("");
+            applyGeocodedLocation(loc, longitude, latitude);
+            // Cache for the rest of this browser session
+            sessionStorage.setItem("qq_geo_cache", JSON.stringify({ loc, lng: longitude, lat: latitude }));
           } else {
             setGpsError("Could not detect address. Enter manually.");
           }
@@ -226,7 +308,7 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
 
     try {
       const bookingRes = await client.post("/api/booking/create", {
-        services: [{ serviceId: service._id, quantity: 1, price: service.price }],
+        services: [{ serviceId: service._id, quantity: isMehendi ? handsCount : 1 }],
         scheduledDate: date,
         scheduledTime: time,
         address: address.trim(),
@@ -242,6 +324,27 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
 
       const bookingId = bookingRes.data?.booking?._id;
       if (!bookingId) throw new Error("Booking creation failed");
+
+      // Save address to backend (fire-and-forget) so it appears in the mobile
+      // app's saved addresses and in future web modal opens. Only saves if not
+      // already saved (match by pincode to avoid exact-duplicate check complexity).
+      if (isLoggedIn && address.trim() && pincode.trim()) {
+        const alreadySaved = savedAddresses.some((a) => a.pincode === pincode.trim() && a.address === address.trim());
+        if (!alreadySaved) {
+          client.post("/api/addresses", {
+            label: addressLabel,
+            address: address.trim(),
+            pincode: pincode.trim(),
+            houseDetails: houseDetails.trim() || undefined,
+            latitude: coords ? coords[1] : undefined,
+            longitude: coords ? coords[0] : undefined,
+          }).then((res) => {
+            if (res.data?.address) {
+              setSavedAddresses((prev) => [...prev, res.data.address]);
+            }
+          }).catch(() => {});
+        }
+      }
 
       const orderRes = await client.post("/api/payment/order", { bookingId });
       if (!orderRes.data?.success) throw new Error(orderRes.data?.message || "Payment order failed");
@@ -310,6 +413,46 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
         ) : (
           <div className="space-y-4">
 
+            {/* Mehendi hands selector */}
+            {isMehendi && (
+              <div>
+                <label className="block text-sm font-medium text-ink mb-1.5">Number of Hands</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 2, 3, 4].map((h) => {
+                    const price = getMehendiHandsPrice(mehendiKey, h) ?? service.price * h;
+                    const originalPrice = mehendiSinglePrice * h;
+                    const hasDiscount = h > 1 && price < originalPrice;
+                    return (
+                      <button
+                        key={h}
+                        onClick={() => setHandsCount(h)}
+                        className={`py-2.5 px-2 rounded-lg border transition flex flex-col items-center gap-0.5 ${
+                          handsCount === h
+                            ? "border-primary bg-primary text-white"
+                            : "border-border text-ink hover:border-primary"
+                        }`}
+                      >
+                        <span className="text-sm font-semibold">{h} {h === 1 ? "Hand" : "Hands"}</span>
+                        <span className={`text-xs font-medium ${handsCount === h ? "text-white/80" : "text-muted"}`}>
+                          ₹{price}
+                        </span>
+                        {hasDiscount && (
+                          <span className={`text-[9px] font-bold ${handsCount === h ? "text-green-200" : "text-green-600"}`}>
+                            Save ₹{originalPrice - price}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                {mehendiDiscount > 0 && (
+                  <p className="text-xs text-green-600 font-medium mt-2">
+                    🎉 You save ₹{mehendiDiscount} by booking both hands together!
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Date */}
             <div>
               <label className="block text-sm font-medium text-ink mb-1.5">Preferred Date</label>
@@ -336,19 +479,19 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
                       key={t.value}
                       onClick={() => isAvailable && setTime(t.value)}
                       disabled={!isAvailable}
-                      className={`py-2 px-2 text-xs font-medium rounded-lg border transition relative ${
+                      className={`py-2 px-2 rounded-lg border transition flex flex-col items-center justify-center gap-0.5 ${
                         isSelected
                           ? "border-primary bg-primary text-white"
                           : isAvailable
                           ? "border-border text-ink hover:border-primary"
-                          : "border-border bg-gray-50 text-gray-300 cursor-not-allowed"
+                          : "border-border bg-gray-50 cursor-not-allowed"
                       }`}
                     >
-                      {t.label}
+                      <span className={`text-xs font-medium ${!isAvailable ? "text-gray-300" : ""}`}>
+                        {t.label}
+                      </span>
                       {!isAvailable && (
-                        <span className="absolute inset-0 flex items-center justify-center">
-                          <span className="text-[9px] text-gray-400 font-semibold">Full</span>
-                        </span>
+                        <span className="text-[9px] font-semibold text-red-300 leading-none">Full</span>
                       )}
                     </button>
                   );
@@ -452,6 +595,31 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
               />
             </div>
 
+            {/* Save address label — only shown when address is filled and user is logged in */}
+            {isLoggedIn && address.trim() && pincode.length === 6 && (
+              <div>
+                <label className="block text-sm font-medium text-ink mb-1.5">
+                  Save this address as
+                </label>
+                <div className="flex gap-2">
+                  {(["Home", "Work", "Other"] as const).map((label) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => setAddressLabel(label)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition ${
+                        addressLabel === label
+                          ? "border-primary bg-primary text-white"
+                          : "border-border text-ink hover:border-primary"
+                      }`}
+                    >
+                      {LABEL_ICONS[label]} {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Pincode */}
             <div>
               <label className="block text-sm font-medium text-ink mb-1.5">Pincode</label>
@@ -462,8 +630,17 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
                 className="input"
                 placeholder="6-digit pincode"
                 value={pincode}
-                onChange={(e) => setPincode(e.target.value.replace(/\D/g, ""))}
+                onChange={(e) => { setPincode(e.target.value.replace(/\D/g, "")); setNotServiceable(false); }}
               />
+              {notServiceable && (
+                <div className="mt-2 flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2.5">
+                  <span className="text-base mt-0.5">😔</span>
+                  <div>
+                    <p className="text-sm font-semibold text-red-700">We don't serve this area yet</p>
+                    <p className="text-xs text-red-500 mt-0.5">Try a nearby pincode or check back soon — we're expanding!</p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Notes */}

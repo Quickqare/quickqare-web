@@ -121,50 +121,195 @@ const STEPS = [
   { n: "3", title: "Expert Arrives", desc: "A verified professional arrives at your door." },
 ];
 
-// ─── Location hook ─────────────────────────────────────────────────────────────
-function useLocation() {
-  const [locationText, setLocationText] = useState("Detecting location…");
-  const [showPicker, setShowPicker] = useState(false);
-  const [manualInput, setManualInput] = useState("");
+// ─── Location storage helpers ──────────────────────────────────────────────────
+const LOC_LABEL_KEY = "qq_web_location";
+const LOC_FULL_KEY  = "qq_web_loc_full";
 
-  useEffect(() => {
-    const saved = localStorage.getItem("qq_web_location");
-    if (saved) { setLocationText(saved); return; }
-    if (!navigator.geolocation) { setLocationText("Set your location"); return; }
+export type SavedLocation = {
+  address: string;
+  pincode: string;
+  latitude: number;
+  longitude: number;
+  label: string;
+};
+
+export function getSavedLocation(): SavedLocation | null {
+  try {
+    const raw = localStorage.getItem(LOC_FULL_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as SavedLocation;
+  } catch { return null; }
+}
+
+function persistLocation(loc: SavedLocation) {
+  localStorage.setItem(LOC_FULL_KEY, JSON.stringify(loc));
+  localStorage.setItem(LOC_LABEL_KEY, loc.label);
+}
+
+async function geocodePosition(latitude: number, longitude: number): Promise<SavedLocation | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
+    );
+    const data = await res.json();
+    const addr = data.address ?? {};
+    const parts = [
+      addr.neighbourhood || addr.suburb || addr.village,
+      addr.city || addr.town || addr.county,
+    ].filter(Boolean);
+    const label = parts.slice(0, 2).join(", ") || data.display_name?.split(",")[0] || "Your location";
+    const pincode = String(addr.postcode || "").replace(/\D/g, "").slice(0, 6);
+    const address = data.display_name || label;
+    return { address, pincode, latitude, longitude, label };
+  } catch { return null; }
+}
+
+// ─── Location prompt modal ─────────────────────────────────────────────────────
+function LocationPromptModal({ onDone }: { onDone: (loc: SavedLocation) => void }) {
+  const [step, setStep] = useState<"prompt" | "detecting" | "manual">("prompt");
+  const [pincodeInput, setPincodeInput] = useState("");
+  const [error, setError] = useState("");
+
+  const handleGps = () => {
+    if (!navigator.geolocation) { setError("Location not supported. Enter pincode below."); return; }
+    setStep("detecting");
+    setError("");
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude, longitude } = pos.coords;
-        try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
-          );
-          const data = await res.json();
-          const addr = data.address;
-          const parts = [
-            addr.neighbourhood || addr.suburb || addr.village,
-            addr.city || addr.town || addr.county,
-          ].filter(Boolean);
-          const label = parts.slice(0, 2).join(", ") || data.display_name?.split(",")[0] || "Your location";
-          setLocationText(label);
-          localStorage.setItem("qq_web_location", label);
-        } catch {
-          setLocationText("Your location");
+        const loc = await geocodePosition(latitude, longitude);
+        if (!loc) {
+          setStep("manual");
+          setError("Could not detect address. Please enter your pincode.");
+          return;
         }
+        // Validate serviceability if we got a pincode
+        if (loc.pincode) {
+          try {
+            const { default: apiClient } = await import("../api/client");
+            const res = await apiClient.get(`/api/zones/check?pincode=${loc.pincode}`);
+            if (!res.data?.serviceable) {
+              setStep("manual");
+              setError(`Sorry, we don't serve ${loc.label} yet. Enter a nearby pincode!`);
+              return;
+            }
+          } catch { /* network error — allow through */ }
+        }
+        persistLocation(loc);
+        onDone(loc);
       },
-      () => setLocationText("Set your location")
+      () => { setStep("manual"); setError("Location access denied. Enter your pincode."); }
     );
-  }, []);
+  };
+
+  const handleManual = async () => {
+    const pin = pincodeInput.trim();
+    if (!/^\d{6}$/.test(pin)) { setError("Enter a valid 6-digit pincode."); return; }
+    setStep("detecting");
+    setError("");
+    try {
+      const { default: apiClient } = await import("../api/client");
+      const res = await apiClient.get(`/api/zones/check?pincode=${pin}`);
+      if (!res.data?.serviceable) {
+        setStep("manual");
+        setError("Sorry, we don't serve this pincode yet. Try a nearby one!");
+        return;
+      }
+    } catch { /* network error — allow through, booking will surface it */ }
+    const loc: SavedLocation = { address: pin, pincode: pin, latitude: 0, longitude: 0, label: pin };
+    persistLocation(loc);
+    onDone(loc);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="bg-[#0A0A0A] px-6 pt-6 pb-5 text-center">
+          <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-3">
+            <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+          </div>
+          <h2 className="text-white font-bold text-lg">Where should we serve you?</h2>
+          <p className="text-white/50 text-sm mt-1">We'll show services available in your area</p>
+        </div>
+
+        <div className="px-6 py-5 space-y-3">
+          {step === "detecting" ? (
+            <div className="flex flex-col items-center py-4 gap-3">
+              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm text-gray-500">Detecting your location…</p>
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={handleGps}
+                className="w-full flex items-center justify-center gap-2.5 bg-primary text-white font-semibold rounded-xl py-3 text-sm hover:bg-primary/90 transition"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="3" strokeWidth="2"/>
+                  <path strokeLinecap="round" strokeWidth="2" d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+                </svg>
+                Use my current location
+              </button>
+
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-px bg-gray-100" />
+                <span className="text-xs text-gray-400">or</span>
+                <div className="flex-1 h-px bg-gray-100" />
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="Enter 6-digit pincode"
+                  value={pincodeInput}
+                  onChange={(e) => { setPincodeInput(e.target.value.replace(/\D/g, "")); setError(""); }}
+                  onKeyDown={(e) => e.key === "Enter" && handleManual()}
+                  className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary"
+                />
+                <button
+                  onClick={handleManual}
+                  className="px-4 py-2.5 bg-[#0A0A0A] text-white text-sm font-semibold rounded-xl hover:bg-gray-800 transition"
+                >
+                  Go
+                </button>
+              </div>
+
+              {error && <p className="text-red-500 text-xs">{error}</p>}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Location hook ─────────────────────────────────────────────────────────────
+function useLocation() {
+  const [locationText, setLocationText] = useState(() => localStorage.getItem(LOC_LABEL_KEY) || "");
+  const [showPicker, setShowPicker] = useState(false);
+  const [manualInput, setManualInput] = useState("");
+
+  const applyLocation = (loc: SavedLocation) => {
+    setLocationText(loc.label);
+  };
 
   const saveManual = () => {
     const v = manualInput.trim();
     if (!v) return;
     setLocationText(v);
-    localStorage.setItem("qq_web_location", v);
+    localStorage.setItem(LOC_LABEL_KEY, v);
     setShowPicker(false);
     setManualInput("");
   };
 
-  return { locationText, showPicker, setShowPicker, manualInput, setManualInput, saveManual };
+  return { locationText, showPicker, setShowPicker, manualInput, setManualInput, saveManual, applyLocation };
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
@@ -180,6 +325,7 @@ export default function HomePage({ onLoginClick }: Props) {
   const [banners, setBanners] = useState<any[]>([]);
   const [bannerIndex, setBannerIndex] = useState(0);
   const { emergency, homeTheme } = useAppConfig();
+  const [showLocationPrompt, setShowLocationPrompt] = useState(() => !getSavedLocation());
 
   // Map category slug → admin-uploaded icon URL (fallback to SVG if empty)
   const getAdminIconUrl = (slug: string): string => {
@@ -295,6 +441,15 @@ export default function HomePage({ onLoginClick }: Props) {
 
   return (
     <>
+      {showLocationPrompt && (
+        <LocationPromptModal
+          onDone={(savedLoc) => {
+            loc.applyLocation(savedLoc);
+            setShowLocationPrompt(false);
+          }}
+        />
+      )}
+
       {/* ── Black header ── */}
       <div className="bg-[#0A0A0A] px-4 pt-5 pb-5">
         <div className="max-w-6xl mx-auto">
