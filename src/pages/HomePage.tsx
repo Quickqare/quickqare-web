@@ -186,8 +186,7 @@ function LocationPromptModal({ onDone }: { onDone: (loc: SavedLocation) => void 
         // Validate serviceability if we got a pincode
         if (loc.pincode) {
           try {
-            const { default: apiClient } = await import("../api/client");
-            const res = await apiClient.get(`/api/zones/check?pincode=${loc.pincode}`);
+            const res = await client.get(`/api/zones/check?pincode=${loc.pincode}`);
             if (!res.data?.serviceable) {
               setStep("manual");
               setError(`Sorry, we don't serve ${loc.label} yet. Enter a nearby pincode!`);
@@ -208,8 +207,7 @@ function LocationPromptModal({ onDone }: { onDone: (loc: SavedLocation) => void 
     setStep("detecting");
     setError("");
     try {
-      const { default: apiClient } = await import("../api/client");
-      const res = await apiClient.get(`/api/zones/check?pincode=${pin}`);
+      const res = await client.get(`/api/zones/check?pincode=${pin}`);
       if (!res.data?.serviceable) {
         setStep("manual");
         setError("Sorry, we don't serve this pincode yet. Try a nearby one!");
