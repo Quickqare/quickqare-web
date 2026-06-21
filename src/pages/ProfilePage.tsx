@@ -1,13 +1,9 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React, { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import client from "../api/client";
-import { useAppConfig } from "../hooks/useAppConfig";
 
 export default function ProfilePage() {
   const { user, logout, refreshUser } = useAuth();
-  const navigate = useNavigate();
-  const { referral } = useAppConfig();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
@@ -15,9 +11,6 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleteReason, setDeleteReason] = useState("");
-  const [deleting, setDeleting] = useState(false);
 
   if (!user) return null;
 
@@ -49,23 +42,10 @@ export default function ProfilePage() {
     setError("");
   };
 
-  const handleDeleteAccount = async () => {
-    setDeleting(true);
-    try {
-      await client.delete("/api/user/me", { data: { reason: deleteReason.trim() } });
-      logout();
-      navigate("/");
-    } catch (e: any) {
-      alert(e.response?.data?.message || "Could not delete account. Please try again.");
-    } finally {
-      setDeleting(false);
-    }
-  };
-
   return (
     <div className="max-w-xl mx-auto px-4 py-10">
       {/* Avatar card */}
-      <div className="card p-6 mb-4">
+      <div className="card p-6 mb-6">
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 rounded-full bg-primary flex items-center justify-center text-white text-xl font-bold shrink-0">
             {initials}
@@ -83,22 +63,43 @@ export default function ProfilePage() {
         <div className="flex items-center justify-between mb-5">
           <h3 className="font-semibold text-ink">Personal Details</h3>
           {!editing && (
-            <button onClick={() => setEditing(true)} className="text-sm text-primary hover:underline font-medium">Edit</button>
+            <button
+              onClick={() => setEditing(true)}
+              className="text-sm text-primary hover:underline font-medium"
+            >
+              Edit
+            </button>
           )}
         </div>
+
         {editing ? (
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-ink mb-1.5">Name</label>
-              <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your full name" />
+              <input
+                className="input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your full name"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-ink mb-1.5">Email (optional)</label>
-              <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" />
+              <input
+                className="input"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@email.com"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-ink mb-1.5">Gender</label>
-              <select className="input" value={gender} onChange={(e) => setGender(e.target.value)}>
+              <select
+                className="input"
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+              >
                 <option value="">Prefer not to say</option>
                 <option value="male">Male</option>
                 <option value="female">Female</option>
@@ -107,8 +108,12 @@ export default function ProfilePage() {
             </div>
             {error && <p className="text-red-500 text-sm">{error}</p>}
             <div className="flex gap-3 pt-1">
-              <button className="btn-primary flex-1" onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</button>
-              <button className="btn-outline flex-1" onClick={handleCancel} disabled={saving}>Cancel</button>
+              <button className="btn-primary flex-1" onClick={handleSave} disabled={saving}>
+                {saving ? "Saving…" : "Save Changes"}
+              </button>
+              <button className="btn-outline flex-1" onClick={handleCancel} disabled={saving}>
+                Cancel
+              </button>
             </div>
           </div>
         ) : (
@@ -119,77 +124,19 @@ export default function ProfilePage() {
             <Row label="Gender" value={user.gender ? capitalize(user.gender) : "—"} />
           </div>
         )}
-        {msg && !editing && <p className="text-green-600 text-sm mt-3">{msg}</p>}
-      </div>
 
-      {/* Quick links */}
-      <div className="card divide-y divide-border mb-4">
-        <Link to="/complaints" className="flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition">
-          <div className="flex items-center gap-3">
-            <span className="text-xl">📝</span>
-            <span className="text-sm font-medium text-ink">Help & Complaints</span>
-          </div>
-          <svg className="w-4 h-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
-          </svg>
-        </Link>
-        {referral.isEnabled && (
-          <Link to="/referral" className="flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition">
-            <div className="flex items-center gap-3">
-              <span className="text-xl">🎁</span>
-              <div>
-                <p className="text-sm font-medium text-ink">Refer & Earn</p>
-                <p className="text-xs text-muted">Earn ₹{referral.referrerRewardAmount} per referral</p>
-              </div>
-            </div>
-            <svg className="w-4 h-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
-            </svg>
-          </Link>
+        {msg && !editing && (
+          <p className="text-green-600 text-sm mt-3">{msg}</p>
         )}
       </div>
 
       {/* Logout */}
-      <button onClick={logout} className="w-full btn-outline text-red-600 border-red-200 hover:bg-red-50 mb-4">
+      <button
+        onClick={logout}
+        className="w-full btn-outline text-red-600 border-red-200 hover:bg-red-50"
+      >
         Logout
       </button>
-
-      {/* Delete account */}
-      {!showDeleteConfirm ? (
-        <button
-          onClick={() => setShowDeleteConfirm(true)}
-          className="w-full text-xs text-muted hover:text-red-500 transition py-2"
-        >
-          Delete my account
-        </button>
-      ) : (
-        <div className="card p-5 border-red-200">
-          <p className="font-semibold text-red-700 mb-1">Delete Account?</p>
-          <p className="text-xs text-muted mb-3">This is permanent and cannot be undone. All your data will be removed.</p>
-          <textarea
-            className="input resize-none text-sm mb-3"
-            rows={2}
-            placeholder="Reason for leaving (optional)"
-            value={deleteReason}
-            onChange={(e) => setDeleteReason(e.target.value)}
-          />
-          <div className="flex gap-2">
-            <button
-              onClick={handleDeleteAccount}
-              disabled={deleting}
-              className="flex-1 py-2 bg-red-600 text-white text-sm font-bold rounded-xl hover:bg-red-700 transition disabled:opacity-50"
-            >
-              {deleting ? "Deleting…" : "Yes, delete my account"}
-            </button>
-            <button
-              onClick={() => setShowDeleteConfirm(false)}
-              className="flex-1 py-2 border border-border text-sm font-semibold rounded-xl hover:border-ink transition"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

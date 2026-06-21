@@ -1,5 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import client, { setToken } from "../api/client";
+import {
+  sendOtp as msg91SendOtp,
+  verifyOtp as msg91VerifyOtp,
+} from "../services/msg91";
 
 type User = { _id: string; name: string; phone: string; email?: string; gender?: string };
 
@@ -41,18 +45,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const sendOtp = async (phone: string) => {
     try {
-      await client.post("/api/auth/send-otp", { phone });
-      return { success: true, message: "" };
+      await msg91SendOtp(phone);
+      return { success: true, message: "OTP sent successfully" };
     } catch (e: any) {
-      return { success: false, message: e.response?.data?.message ?? e.message ?? "Failed to send OTP" };
+      return { success: false, message: e?.message ?? "Failed to send OTP" };
     }
   };
 
   const verifyOtp = async (phone: string, otp: string) => {
     try {
-      const res = await client.post("/api/auth/verify-otp", { phone, otp });
+      // Step 1: verify OTP via MSG91 widget → get accessToken
+      const { accessToken } = await msg91VerifyOtp(otp);
+
+      // Step 2: exchange accessToken for backend JWT
+      const res = await client.post("/api/auth/msg91/exchange", { phone, accessToken });
       if (res.data?.success) {
-        const t = res.data.token;
+        const t = res.data.token ?? res.data.accessToken;
         const u = res.data.user;
         setTokenState(t);
         setToken(t);
@@ -63,7 +71,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
       return { success: false, message: res.data?.message ?? "Verification failed" };
     } catch (e: any) {
-      return { success: false, message: e.response?.data?.message ?? e.message ?? "Verification failed" };
+      return {
+        success: false,
+        message: e?.response?.data?.message ?? e?.message ?? "Verification failed",
+      };
     }
   };
 

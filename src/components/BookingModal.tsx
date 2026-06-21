@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import React, { useState } from "react";
 import client from "../api/client";
-import { useAppConfig } from "../hooks/useAppConfig";
-import { getSavedLocation } from "../pages/HomePage";
 
 type Service = {
   _id: string;
@@ -9,8 +7,9 @@ type Service = {
   price: number;
   category?: { name: string } | string | null;
 };
-type Props = { service: Service; onClose: () => void; onSuccess: (bookingId: string) => void };
+type Props = { service: Service; onClose: () => void; onSuccess: () => void };
 
+/* 24-hour values sent to backend; 12-hour labels shown to user */
 const TIME_SLOTS: { value: string; label: string }[] = [
   { value: "08:00", label: "8:00 AM" },
   { value: "09:00", label: "9:00 AM" },
@@ -25,286 +24,18 @@ const TIME_SLOTS: { value: string; label: string }[] = [
   { value: "18:00", label: "6:00 PM" },
 ];
 
-const LABEL_ICONS: Record<string, string> = { Home: "🏠", Work: "💼", Other: "📍" };
-
-// ─── Mehendi hands pricing (mirrors mobile mehendiPricing.ts) ─────────────────
-const FEET_NAMES = new Set(["feet","basic feet","ankle","above ankle","mid leg","below knee"]);
-
-function getMehendiPricingKey(name: string): string | null {
-  const n = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  if (n.includes("minimal mehendi"))              return "minimal";
-  if (n.includes("palm length mehendi"))          return "palm";
-  if (n.includes("bangle length mehendi"))        return "bangle";
-  if (n.includes("mid length mehendi"))           return "mid";
-  if (n.includes("elbow length bridal mehendi"))  return "elbow_bridal";
-  if (n.includes("above elbow bridal mehendi"))   return "above_elbow_bridal";
-  return null;
-}
-
-function getMehendiHandsPrice(key: string | null, hands: number): number | null {
-  const q = Math.max(hands, 1);
-  if (key === "minimal")           return [0,399,699,999,1199][q] ?? q * 299;
-  if (key === "palm")              return [0,499,798,1149,1499][q] ?? q * 399;
-  if (key === "bangle")            return [0,799,1199,1699,2199][q] ?? Math.round(q * 599 * 0.95);
-  if (key === "mid")               return [0,999,1499,2099,2599][q] ?? q * 629;
-  if (key === "elbow_bridal")      return [0,1799,3000][q] ?? Math.round(q * 1799 * 0.75);
-  if (key === "above_elbow_bridal")return [0,2000,3500][q] ?? null;
-  return null;
-}
-
-function isMehendiHandService(name: string): boolean {
-  const n = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  if (!n.includes("mehendi")) return false;
-  if (FEET_NAMES.has(n)) return false;
-  return getMehendiPricingKey(name) !== null;
-}
-
 function todayISO() {
   return new Date().toISOString().split("T")[0];
 }
 
-declare const Razorpay: any;
-
 export default function BookingModal({ service, onClose, onSuccess }: Props) {
   const [date, setDate] = useState(todayISO());
-  const [time, setTime] = useState("");
+  const [time, setTime] = useState(""); // "HH:MM" 24-hour
   const [address, setAddress] = useState("");
-  const [houseDetails, setHouseDetails] = useState("");
   const [pincode, setPincode] = useState("");
   const [notes, setNotes] = useState("");
-  const [coords, setCoords] = useState<[number, number] | null>(null); // [lng, lat]
-
-  const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
-  const [addressesLoading, setAddressesLoading] = useState(false);
-  const [gpsLoading, setGpsLoading] = useState(false);
-  const [gpsError, setGpsError] = useState("");
-
-  const [availableSlotTimes, setAvailableSlotTimes] = useState<string[] | null>(null); // null = loading/unknown
-  const [slotsLoading, setSlotsLoading] = useState(false);
-
-  const [couponInput, setCouponInput] = useState("");
-  const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discount: number } | null>(null);
-  const [couponLoading, setCouponLoading] = useState(false);
-  const [couponError, setCouponError] = useState("");
-  const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
-  const [showCoupons, setShowCoupons] = useState(false);
-  const [couponsLoading, setCouponsLoading] = useState(false);
-
-  const [addressLabel, setAddressLabel] = useState<"Home" | "Work" | "Other">("Home");
-  const [notServiceable, setNotServiceable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [step, setStep] = useState<"form" | "paying">("form");
-
-  const isMehendi = isMehendiHandService(service.name);
-  const mehendiKey = getMehendiPricingKey(service.name);
-  const [handsCount, setHandsCount] = useState(1);
-  const mehendiPrice = isMehendi ? (getMehendiHandsPrice(mehendiKey, handsCount) ?? service.price * handsCount) : service.price;
-  const mehendiSinglePrice = isMehendi ? (getMehendiHandsPrice(mehendiKey, 1) ?? service.price) : service.price;
-  const mehendiDiscount = isMehendi && handsCount > 1 ? Math.max((mehendiSinglePrice * handsCount) - mehendiPrice, 0) : 0;
-
-  const isLoggedIn = Boolean(localStorage.getItem("qq_web_token"));
-
-  // Pre-fill from the location set at homepage prompt. Only prefill address
-  // when GPS was used (coords are non-zero) — a pincode-only entry has no
-  // meaningful address string to show. Pincode always prefills so slot
-  // availability check fires immediately.
-  useEffect(() => {
-    const saved = getSavedLocation();
-    if (!saved) return;
-    const hasGps = saved.latitude !== 0 && saved.longitude !== 0;
-    if (hasGps && saved.address) setAddress(saved.address);
-    if (saved.pincode) setPincode(saved.pincode);
-    if (hasGps) setCoords([saved.longitude, saved.latitude]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Fetch saved addresses on mount (only if logged in)
-  useEffect(() => {
-    if (!isLoggedIn) return;
-    setAddressesLoading(true);
-    client.get("/api/addresses")
-      .then((res) => setSavedAddresses(Array.isArray(res.data?.addresses) ? res.data.addresses : []))
-      .catch(() => {})
-      .finally(() => setAddressesLoading(false));
-  }, [isLoggedIn]);
-
-  // Fetch available slots — only when we have a valid 6-digit pincode
-  const fetchSlots = useCallback(async (forDate: string, forPincode: string) => {
-    if (!forPincode || forPincode.length !== 6) {
-      // No pincode yet — show all slots as selectable, don't hit the backend
-      setAvailableSlotTimes(null);
-      return;
-    }
-    setSlotsLoading(true);
-    setNotServiceable(false);
-    try {
-      const res = await client.post("/api/booking/available-slots", {
-        date: forDate,
-        services: [{ serviceId: service._id, quantity: isMehendi ? handsCount : 1 }],
-        pincode: forPincode,
-      });
-      const slots: any[] = Array.isArray(res.data?.slots) ? res.data.slots : [];
-      setAvailableSlotTimes(slots.map((s) => String(s?.time || s || "").trim()).filter(Boolean));
-    } catch (err: any) {
-      if (err?.response?.status === 403) {
-        setNotServiceable(true);
-        setAvailableSlotTimes([]);
-      } else {
-        setAvailableSlotTimes(null); // generic error → show all slots
-      }
-    } finally {
-      setSlotsLoading(false);
-    }
-  }, [service._id, isMehendi, handsCount]);
-
-  // Re-fetch slots when date changes (only if pincode already known)
-  useEffect(() => {
-    if (pincode.length === 6) {
-      setTime("");
-      fetchSlots(date, pincode);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date]);
-
-  // Fetch slots once pincode becomes valid (GPS fill or manual entry)
-  useEffect(() => {
-    if (pincode.length === 6) fetchSlots(date, pincode);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pincode]);
-
-  // Re-fetch slots when hands count changes for mehendi (capacity differs per quantity)
-  useEffect(() => {
-    if (isMehendi && pincode.length === 6) {
-      setTime("");
-      fetchSlots(date, pincode);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handsCount]);
-
-  const applyAddress = (addr: any) => {
-    setAddress(addr.address || "");
-    setPincode(addr.pincode || "");
-    setHouseDetails(addr.houseDetails || "");
-    if (addr.latitude && addr.longitude) {
-      setCoords([Number(addr.longitude), Number(addr.latitude)]);
-    }
-    setError("");
-  };
-
-  const applyGeocodedLocation = (loc: { address: string; pincode: string }, longitude: number, latitude: number) => {
-    setAddress(loc.address || "");
-    setPincode(loc.pincode || "");
-    setCoords([longitude, latitude]);
-    setError("");
-  };
-
-  const handleUseMyLocation = () => {
-    // Check session cache first — avoids a Maps API call if the user already
-    // geocoded their location in this browser session (e.g. from a previous
-    // service modal). Cache key is rounded coords so minor GPS drift reuses it.
-    const cached = sessionStorage.getItem("qq_geo_cache");
-    if (cached) {
-      try {
-        const { loc, lng, lat } = JSON.parse(cached);
-        if (loc?.address && loc?.pincode) {
-          applyGeocodedLocation(loc, lng, lat);
-          return;
-        }
-      } catch { /* corrupt cache — fall through to fresh fetch */ }
-    }
-
-    if (!navigator.geolocation) {
-      setGpsError("Geolocation not supported by your browser.");
-      return;
-    }
-    setGpsLoading(true);
-    setGpsError("");
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude, longitude } = pos.coords;
-        try {
-          const res = await client.get(`/api/maps/reverse?lat=${latitude}&lng=${longitude}`);
-          const loc = res.data?.location;
-          if (loc) {
-            applyGeocodedLocation(loc, longitude, latitude);
-            // Cache for the rest of this browser session
-            sessionStorage.setItem("qq_geo_cache", JSON.stringify({ loc, lng: longitude, lat: latitude }));
-          } else {
-            setGpsError("Could not detect address. Enter manually.");
-          }
-        } catch {
-          setGpsError("Could not detect address. Enter manually.");
-        } finally {
-          setGpsLoading(false);
-        }
-      },
-      () => {
-        setGpsError("Location permission denied. Enter address manually.");
-        setGpsLoading(false);
-      },
-      { timeout: 10000 }
-    );
-  };
-
-  const { pricing } = useAppConfig();
-  const discount = appliedCoupon?.discount ?? 0;
-  const taxableAmount = Math.max(service.price - discount, 0);
-  const platformFeeAmount = Math.round(
-    (taxableAmount * (pricing.platformFeePercent ?? 0)) / 100 +
-    (pricing.platformFeeFlatInr ?? 0)
-  );
-  const gstAmount = Math.round(
-    ((taxableAmount + platformFeeAmount) * (pricing.taxPercent ?? 18)) / 100
-  );
-  const totalPayable = taxableAmount + platformFeeAmount + gstAmount;
-
-  const applyCoupon = async () => {
-    const code = couponInput.trim().toUpperCase();
-    if (!code) return;
-    setCouponLoading(true);
-    setCouponError("");
-    try {
-      const res = await client.post("/api/coupons/apply", {
-        code,
-        amount: service.price,
-        serviceIds: [service._id],
-      });
-      if (res.data?.success) {
-        setAppliedCoupon({ code, discount: res.data.discount });
-      } else {
-        setCouponError(res.data?.message || "Invalid coupon");
-        setAppliedCoupon(null);
-      }
-    } catch (e: any) {
-      setCouponError(e.response?.data?.message || "Invalid coupon");
-      setAppliedCoupon(null);
-    } finally {
-      setCouponLoading(false);
-    }
-  };
-
-  const removeCoupon = () => {
-    setAppliedCoupon(null);
-    setCouponInput("");
-    setCouponError("");
-  };
-
-  const loadAvailableCoupons = async () => {
-    if (availableCoupons.length) { setShowCoupons((v) => !v); return; }
-    setShowCoupons(true);
-    setCouponsLoading(true);
-    try {
-      const res = await client.get(`/api/coupons/available?amount=${service.price}&serviceIds=${service._id}`);
-      setAvailableCoupons(Array.isArray(res.data?.coupons) ? res.data.coupons : []);
-    } catch { } finally { setCouponsLoading(false); }
-  };
-
-  const applyFromList = (code: string) => {
-    setCouponInput(code);
-    setShowCoupons(false);
-    applyCoupon();
-  };
 
   const handleBook = async () => {
     if (!time) return setError("Please select a time slot.");
@@ -313,90 +44,23 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
       return setError("Please enter a valid 6-digit pincode.");
     setError("");
     setLoading(true);
-    setStep("paying");
-
     try {
-      const bookingRes = await client.post("/api/booking/create", {
-        services: [{ serviceId: service._id, quantity: isMehendi ? handsCount : 1 }],
+      await client.post("/api/booking/create", {
+        // New multi-service format
+        services: [{ serviceId: service._id, quantity: 1, price: service.price }],
         scheduledDate: date,
-        scheduledTime: time,
+        scheduledTime: time, // backend expects "HH:MM" 24-hour
         address: address.trim(),
         pincode: pincode.trim(),
-        houseDetails: houseDetails.trim() || undefined,
-        notes: notes.trim() || undefined,
-        couponCode: appliedCoupon?.code || undefined,
-        location: {
-          type: "Point",
-          coordinates: coords ?? [0, 0],
-        },
+        notes: notes.trim(),
+        // Provide a dummy location so assignment engine has coordinates
+        // In production this should come from the browser geolocation
+        location: { type: "Point", coordinates: [0, 0] },
       });
-
-      const bookingId = bookingRes.data?.booking?._id;
-      if (!bookingId) throw new Error("Booking creation failed");
-
-      // Save address to backend (fire-and-forget) so it appears in the mobile
-      // app's saved addresses and in future web modal opens. Only saves if not
-      // already saved (match by pincode to avoid exact-duplicate check complexity).
-      if (isLoggedIn && address.trim() && pincode.trim()) {
-        const alreadySaved = savedAddresses.some((a) => a.pincode === pincode.trim() && a.address === address.trim());
-        if (!alreadySaved) {
-          client.post("/api/addresses", {
-            label: addressLabel,
-            address: address.trim(),
-            pincode: pincode.trim(),
-            houseDetails: houseDetails.trim() || undefined,
-            latitude: coords ? coords[1] : undefined,
-            longitude: coords ? coords[0] : undefined,
-          }).then((res) => {
-            if (res.data?.address) {
-              setSavedAddresses((prev) => [...prev, res.data.address]);
-            }
-          }).catch(() => {});
-        }
-      }
-
-      const orderRes = await client.post("/api/payment/order", { bookingId });
-      if (!orderRes.data?.success) throw new Error(orderRes.data?.message || "Payment order failed");
-
-      const { order } = orderRes.data;
-
-      const rzp = new Razorpay({
-        key: order.key_id,
-        amount: order.amount,
-        currency: order.currency || "INR",
-        order_id: order.id,
-        name: "QuickQare",
-        description: service.name,
-        theme: { color: "#22A06B" },
-        handler: async (response: any) => {
-          try {
-            await client.post("/api/payment/verify", {
-              bookingId,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_signature: response.razorpay_signature,
-            });
-            onSuccess(bookingId);
-          } catch {
-            setError("Payment verification failed. Please contact support.");
-            setStep("form");
-          } finally {
-            setLoading(false);
-          }
-        },
-        modal: {
-          ondismiss: () => {
-            setStep("form");
-            setLoading(false);
-            setError("Payment was cancelled. You can try again.");
-          },
-        },
-      });
-
-      rzp.open();
+      onSuccess();
     } catch (e: any) {
-      setError(e.response?.data?.message ?? e.message ?? "Could not place booking. Try again.");
-      setStep("form");
+      setError(e.response?.data?.message ?? "Could not place booking. Try again.");
+    } finally {
       setLoading(false);
     }
   };
@@ -404,363 +68,119 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
       <div className="card w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-
         {/* Header */}
         <div className="flex items-start justify-between mb-5">
           <div>
             <h2 className="text-lg font-bold text-ink">Book Service</h2>
             <p className="text-sm text-muted mt-0.5">{service.name}</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-ink text-2xl leading-none ml-4">×</button>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-ink text-2xl leading-none ml-4"
+          >
+            ×
+          </button>
         </div>
 
-        {step === "paying" ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-4">
-            <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            <p className="text-sm text-muted">Opening payment…</p>
+        <div className="space-y-4">
+          {/* Date */}
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1.5">
+              Preferred Date
+            </label>
+            <input
+              type="date"
+              className="input"
+              value={date}
+              min={todayISO()}
+              onChange={(e) => setDate(e.target.value)}
+            />
           </div>
-        ) : (
-          <div className="space-y-4">
 
-            {/* Mehendi hands selector */}
-            {isMehendi && (
-              <div>
-                <label className="block text-sm font-medium text-ink mb-1.5">Number of Hands</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {[1, 2, 3, 4].map((h) => {
-                    const price = getMehendiHandsPrice(mehendiKey, h) ?? service.price * h;
-                    const originalPrice = mehendiSinglePrice * h;
-                    const hasDiscount = h > 1 && price < originalPrice;
-                    return (
-                      <button
-                        key={h}
-                        onClick={() => setHandsCount(h)}
-                        className={`py-2.5 px-2 rounded-lg border transition flex flex-col items-center gap-0.5 ${
-                          handsCount === h
-                            ? "border-primary bg-primary text-white"
-                            : "border-border text-ink hover:border-primary"
-                        }`}
-                      >
-                        <span className="text-sm font-semibold">{h} {h === 1 ? "Hand" : "Hands"}</span>
-                        <span className={`text-xs font-medium ${handsCount === h ? "text-white/80" : "text-muted"}`}>
-                          ₹{price}
-                        </span>
-                        {hasDiscount && (
-                          <span className={`text-[9px] font-bold ${handsCount === h ? "text-green-200" : "text-green-600"}`}>
-                            Save ₹{originalPrice - price}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                {mehendiDiscount > 0 && (
-                  <p className="text-xs text-green-600 font-medium mt-2">
-                    🎉 You save ₹{mehendiDiscount} by booking both hands together!
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Date */}
-            <div>
-              <label className="block text-sm font-medium text-ink mb-1.5">Preferred Date</label>
-              <input type="date" className="input" value={date} min={todayISO()} onChange={(e) => setDate(e.target.value)} />
+          {/* Time slot */}
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1.5">
+              Time Slot
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {TIME_SLOTS.map((t) => (
+                <button
+                  key={t.value}
+                  onClick={() => setTime(t.value)}
+                  className={`py-2 px-2 text-xs font-medium rounded-lg border transition ${
+                    time === t.value
+                      ? "border-primary bg-primary text-white"
+                      : "border-border text-ink hover:border-primary"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
-
-            {/* Time slots */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-sm font-medium text-ink">Time Slot</label>
-                {slotsLoading && (
-                  <span className="text-xs text-muted flex items-center gap-1">
-                    <span className="w-3 h-3 border border-primary border-t-transparent rounded-full animate-spin inline-block" />
-                    Checking availability…
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {TIME_SLOTS.map((t) => {
-                  const isAvailable = availableSlotTimes === null || availableSlotTimes.includes(t.value);
-                  const isSelected = time === t.value;
-                  return (
-                    <button
-                      key={t.value}
-                      onClick={() => isAvailable && setTime(t.value)}
-                      disabled={!isAvailable}
-                      className={`py-2 px-2 rounded-lg border transition flex flex-col items-center justify-center gap-0.5 ${
-                        isSelected
-                          ? "border-primary bg-primary text-white"
-                          : isAvailable
-                          ? "border-border text-ink hover:border-primary"
-                          : "border-border bg-gray-50 cursor-not-allowed"
-                      }`}
-                    >
-                      <span className={`text-xs font-medium ${!isAvailable ? "text-gray-300" : ""}`}>
-                        {t.label}
-                      </span>
-                      {!isAvailable && (
-                        <span className="text-[9px] font-semibold text-red-300 leading-none">Full</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              {availableSlotTimes !== null && availableSlotTimes.length === 0 && (
-                <p className="text-xs text-red-500 mt-2">No slots available for this date. Try another date.</p>
-              )}
-              {pincode.length !== 6 && (
-                <p className="text-xs text-muted mt-2 flex items-center gap-1.5">
-                  <span>📍</span>
-                  Add your location below to check live slot availability for your area.
-                </p>
-              )}
-            </div>
-
-            {/* ── Address section ── */}
-            <div>
-              <label className="block text-sm font-medium text-ink mb-2">Service Address</label>
-
-              {/* Saved addresses */}
-              {isLoggedIn && (
-                <div className="mb-2">
-                  {addressesLoading ? (
-                    <div className="h-10 bg-gray-100 rounded-xl animate-pulse" />
-                  ) : savedAddresses.length > 0 ? (
-                    <div className="space-y-2 mb-2">
-                      {savedAddresses.map((addr) => (
-                        <div
-                          key={addr._id}
-                          className="flex items-center justify-between bg-gray-50 border border-border rounded-xl px-3 py-2.5"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-base shrink-0">{LABEL_ICONS[addr.label] ?? "📍"}</span>
-                            <div className="min-w-0">
-                              <p className="text-xs font-bold text-primary uppercase tracking-wide">{addr.label}</p>
-                              <p className="text-xs text-ink truncate">{addr.address}</p>
-                              {addr.houseDetails && (
-                                <p className="text-xs text-muted truncate">{addr.houseDetails}</p>
-                              )}
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => applyAddress(addr)}
-                            className="ml-3 shrink-0 text-xs font-semibold text-primary border border-primary rounded-lg px-3 py-1.5 hover:bg-primary hover:text-white transition"
-                          >
-                            Use
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              )}
-
-              {/* GPS button */}
-              <button
-                onClick={handleUseMyLocation}
-                disabled={gpsLoading}
-                className="w-full flex items-center justify-center gap-2 border border-border rounded-xl py-2.5 text-sm font-medium text-ink hover:border-primary hover:text-primary transition mb-2 disabled:opacity-50"
-              >
-                {gpsLoading ? (
-                  <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="3" strokeWidth="2"/>
-                    <path strokeLinecap="round" strokeWidth="2" d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
-                  </svg>
-                )}
-                {gpsLoading ? "Detecting location…" : "Use my current location"}
-              </button>
-              {gpsError && <p className="text-red-500 text-xs mb-2">{gpsError}</p>}
-
-              {/* Divider */}
-              <div className="flex items-center gap-2 mb-2">
-                <div className="flex-1 h-px bg-border" />
-                <span className="text-xs text-muted">or enter manually</span>
-                <div className="flex-1 h-px bg-border" />
-              </div>
-
-              {/* Manual address input */}
-              <textarea
-                className="input resize-none"
-                rows={2}
-                placeholder="Street, area, city…"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-              />
-            </div>
-
-            {/* House / Flat */}
-            <div>
-              <label className="block text-sm font-medium text-ink mb-1.5">
-                House / Flat / Floor <span className="text-muted font-normal">(optional)</span>
-              </label>
-              <input
-                className="input"
-                placeholder="e.g. Flat 4B, 2nd Floor"
-                value={houseDetails}
-                onChange={(e) => setHouseDetails(e.target.value)}
-              />
-            </div>
-
-            {/* Save address label — only shown when address is filled and user is logged in */}
-            {isLoggedIn && address.trim() && pincode.length === 6 && (
-              <div>
-                <label className="block text-sm font-medium text-ink mb-1.5">
-                  Save this address as
-                </label>
-                <div className="flex gap-2">
-                  {(["Home", "Work", "Other"] as const).map((label) => (
-                    <button
-                      key={label}
-                      type="button"
-                      onClick={() => setAddressLabel(label)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition ${
-                        addressLabel === label
-                          ? "border-primary bg-primary text-white"
-                          : "border-border text-ink hover:border-primary"
-                      }`}
-                    >
-                      {LABEL_ICONS[label]} {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Pincode */}
-            <div>
-              <label className="block text-sm font-medium text-ink mb-1.5">Pincode</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                className="input"
-                placeholder="6-digit pincode"
-                value={pincode}
-                onChange={(e) => { setPincode(e.target.value.replace(/\D/g, "")); setNotServiceable(false); }}
-              />
-              {notServiceable && (
-                <div className="mt-2 flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2.5">
-                  <span className="text-base mt-0.5">😔</span>
-                  <div>
-                    <p className="text-sm font-semibold text-red-700">We don't serve this area yet</p>
-                    <p className="text-xs text-red-500 mt-0.5">Try a nearby pincode or check back soon — we're expanding!</p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Notes */}
-            <div>
-              <label className="block text-sm font-medium text-ink mb-1.5">
-                Notes <span className="text-muted font-normal">(optional)</span>
-              </label>
-              <textarea
-                className="input resize-none"
-                rows={2}
-                placeholder="Any special instructions…"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-            </div>
-
-            {/* Coupon */}
-            <div>
-              <label className="block text-sm font-medium text-ink mb-1.5">Coupon Code</label>
-              {appliedCoupon ? (
-                <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-4 py-3">
-                  <div>
-                    <p className="text-sm font-bold text-green-700">{appliedCoupon.code}</p>
-                    <p className="text-xs text-green-600 mt-0.5">Discount applied: −₹{appliedCoupon.discount}</p>
-                  </div>
-                  <button onClick={removeCoupon} className="text-xs font-semibold text-red-500 hover:text-red-700">Remove</button>
-                </div>
-              ) : (
-                <div className="flex gap-2">
-                  <input
-                    className="input flex-1"
-                    placeholder="Enter coupon code"
-                    value={couponInput}
-                    onChange={(e) => { setCouponInput(e.target.value.toUpperCase()); setCouponError(""); }}
-                    onKeyDown={(e) => e.key === "Enter" && applyCoupon()}
-                  />
-                  <button
-                    className="px-4 py-2 rounded-xl border border-primary text-primary text-sm font-semibold hover:bg-primary hover:text-white transition disabled:opacity-50"
-                    onClick={applyCoupon}
-                    disabled={couponLoading || !couponInput.trim()}
-                  >
-                    {couponLoading ? "…" : "Apply"}
-                  </button>
-                </div>
-              )}
-              {couponError && <p className="text-red-500 text-xs mt-1.5">{couponError}</p>}
-
-              {/* Available coupons toggle */}
-              {!appliedCoupon && (
-                <div>
-                  <button onClick={loadAvailableCoupons} className="text-xs text-primary font-semibold mt-2 hover:underline">
-                    {showCoupons ? "▲ Hide coupons" : "▼ View available coupons"}
-                  </button>
-                  {showCoupons && (
-                    <div className="mt-2 space-y-2">
-                      {couponsLoading ? (
-                        <div className="h-8 bg-gray-100 rounded-lg animate-pulse" />
-                      ) : availableCoupons.length === 0 ? (
-                        <p className="text-xs text-muted py-1">No coupons available for this service.</p>
-                      ) : availableCoupons.map((c) => (
-                        <div key={c._id || c.code} className="flex items-center justify-between bg-gray-50 border border-border rounded-xl px-3 py-2.5">
-                          <div>
-                            <p className="text-xs font-bold text-ink tracking-wide">{c.code}</p>
-                            <p className="text-xs text-muted">{c.displayText}</p>
-                            {c.minOrder > 0 && <p className="text-xs text-muted">Min order ₹{c.minOrder}</p>}
-                          </div>
-                          <button
-                            onClick={() => applyFromList(c.code)}
-                            className="ml-3 shrink-0 text-xs font-semibold text-primary border border-primary rounded-lg px-3 py-1.5 hover:bg-primary hover:text-white transition"
-                          >
-                            Apply
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Price summary */}
-            <div className="bg-gray-50 rounded-xl p-3 space-y-1.5">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted">Service price</span>
-                <span className="font-semibold text-ink">₹{service.price.toLocaleString("en-IN")}</span>
-              </div>
-              {discount > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted">Coupon discount</span>
-                  <span className="font-semibold text-green-600">−₹{discount.toLocaleString("en-IN")}</span>
-                </div>
-              )}
-              {(platformFeeAmount + gstAmount) > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted">Fees & Taxes</span>
-                  <span className="font-semibold text-ink">₹{(platformFeeAmount + gstAmount).toLocaleString("en-IN")}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-sm border-t border-gray-200 pt-1.5">
-                <span className="font-bold text-ink">Total Payable</span>
-                <span className="font-extrabold text-primary">₹{totalPayable.toLocaleString("en-IN")}</span>
-              </div>
-            </div>
-
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-
-            <button className="btn-primary w-full" onClick={handleBook} disabled={loading}>
-              {loading ? "Processing…" : "Confirm & Pay"}
-            </button>
           </div>
-        )}
+
+          {/* Address */}
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1.5">
+              Service Address
+            </label>
+            <textarea
+              className="input resize-none"
+              rows={2}
+              placeholder="Flat no, building, street, city…"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+            />
+          </div>
+
+          {/* Pincode */}
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1.5">
+              Pincode
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              className="input"
+              placeholder="6-digit pincode"
+              value={pincode}
+              onChange={(e) => setPincode(e.target.value.replace(/\D/g, ""))}
+            />
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1.5">
+              Notes (optional)
+            </label>
+            <textarea
+              className="input resize-none"
+              rows={2}
+              placeholder="Any special instructions…"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+
+          {/* Price summary */}
+          <div className="bg-gray-50 rounded-xl p-3 flex justify-between items-center">
+            <span className="text-sm text-muted">Starting from</span>
+            <span className="font-bold text-ink text-base">
+              ₹{service.price?.toLocaleString("en-IN")}
+            </span>
+          </div>
+
+          {error && <p className="text-red-500 text-sm">{error}</p>}
+
+          <button
+            className="btn-primary w-full"
+            onClick={handleBook}
+            disabled={loading}
+          >
+            {loading ? "Booking…" : "Confirm Booking"}
+          </button>
+        </div>
       </div>
     </div>
   );

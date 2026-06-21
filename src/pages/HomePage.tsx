@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import client from "../api/client";
 import BookingModal from "../components/BookingModal";
-import { useAppConfig } from "../hooks/useAppConfig";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type CategoryObj = { _id: string; name: string; slug?: string; imageUrl?: string };
@@ -121,248 +120,64 @@ const STEPS = [
   { n: "3", title: "Expert Arrives", desc: "A verified professional arrives at your door." },
 ];
 
-// ─── Location storage helpers ──────────────────────────────────────────────────
-const LOC_LABEL_KEY = "qq_web_location";
-const LOC_FULL_KEY  = "qq_web_loc_full";
-
-export type SavedLocation = {
-  address: string;
-  pincode: string;
-  latitude: number;
-  longitude: number;
-  label: string;
-};
-
-export function getSavedLocation(): SavedLocation | null {
-  try {
-    const raw = localStorage.getItem(LOC_FULL_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as SavedLocation;
-  } catch { return null; }
-}
-
-function persistLocation(loc: SavedLocation) {
-  localStorage.setItem(LOC_FULL_KEY, JSON.stringify(loc));
-  localStorage.setItem(LOC_LABEL_KEY, loc.label);
-}
-
-async function geocodePosition(latitude: number, longitude: number): Promise<SavedLocation | null> {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
-    );
-    const data = await res.json();
-    const addr = data.address ?? {};
-    const parts = [
-      addr.neighbourhood || addr.suburb || addr.village,
-      addr.city || addr.town || addr.county,
-    ].filter(Boolean);
-    const label = parts.slice(0, 2).join(", ") || data.display_name?.split(",")[0] || "Your location";
-    const pincode = String(addr.postcode || "").replace(/\D/g, "").slice(0, 6);
-    const address = data.display_name || label;
-    return { address, pincode, latitude, longitude, label };
-  } catch { return null; }
-}
-
-// ─── Location prompt modal ─────────────────────────────────────────────────────
-function LocationPromptModal({ onDone }: { onDone: (loc: SavedLocation) => void }) {
-  const [step, setStep] = useState<"prompt" | "detecting" | "manual">("prompt");
-  const [pincodeInput, setPincodeInput] = useState("");
-  const [error, setError] = useState("");
-
-  const handleGps = () => {
-    if (!navigator.geolocation) { setError("Location not supported. Enter pincode below."); return; }
-    setStep("detecting");
-    setError("");
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude, longitude } = pos.coords;
-        const loc = await geocodePosition(latitude, longitude);
-        if (!loc) {
-          setStep("manual");
-          setError("Could not detect address. Please enter your pincode.");
-          return;
-        }
-        // Validate serviceability if we got a pincode
-        if (loc.pincode) {
-          try {
-            const res = await client.get(`/api/zones/check?pincode=${loc.pincode}`);
-            if (!res.data?.serviceable) {
-              setStep("manual");
-              setError(`Sorry, we don't serve ${loc.label} yet. Enter a nearby pincode!`);
-              return;
-            }
-          } catch { /* network error — allow through */ }
-        }
-        persistLocation(loc);
-        onDone(loc);
-      },
-      () => { setStep("manual"); setError("Location access denied. Enter your pincode."); }
-    );
-  };
-
-  const handleManual = async () => {
-    const pin = pincodeInput.trim();
-    if (!/^\d{6}$/.test(pin)) { setError("Enter a valid 6-digit pincode."); return; }
-    setStep("detecting");
-    setError("");
-    try {
-      const res = await client.get(`/api/zones/check?pincode=${pin}`);
-      if (!res.data?.serviceable) {
-        setStep("manual");
-        setError("Sorry, we don't serve this pincode yet. Try a nearby one!");
-        return;
-      }
-    } catch { /* network error — allow through, booking will surface it */ }
-    const loc: SavedLocation = { address: pin, pincode: pin, latitude: 0, longitude: 0, label: pin };
-    persistLocation(loc);
-    onDone(loc);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
-        {/* Header */}
-        <div className="bg-[#0A0A0A] px-6 pt-6 pb-5 text-center">
-          <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-3">
-            <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
-            </svg>
-          </div>
-          <h2 className="text-white font-bold text-lg">Where should we serve you?</h2>
-          <p className="text-white/50 text-sm mt-1">We'll show services available in your area</p>
-        </div>
-
-        <div className="px-6 py-5 space-y-3">
-          {step === "detecting" ? (
-            <div className="flex flex-col items-center py-4 gap-3">
-              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm text-gray-500">Detecting your location…</p>
-            </div>
-          ) : (
-            <>
-              <button
-                onClick={handleGps}
-                className="w-full flex items-center justify-center gap-2.5 bg-primary text-white font-semibold rounded-xl py-3 text-sm hover:bg-primary/90 transition"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <circle cx="12" cy="12" r="3" strokeWidth="2"/>
-                  <path strokeLinecap="round" strokeWidth="2" d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
-                </svg>
-                Use my current location
-              </button>
-
-              <div className="flex items-center gap-2">
-                <div className="flex-1 h-px bg-gray-100" />
-                <span className="text-xs text-gray-400">or</span>
-                <div className="flex-1 h-px bg-gray-100" />
-              </div>
-
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="Enter 6-digit pincode"
-                  value={pincodeInput}
-                  onChange={(e) => { setPincodeInput(e.target.value.replace(/\D/g, "")); setError(""); }}
-                  onKeyDown={(e) => e.key === "Enter" && handleManual()}
-                  className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary"
-                />
-                <button
-                  onClick={handleManual}
-                  className="px-4 py-2.5 bg-[#0A0A0A] text-white text-sm font-semibold rounded-xl hover:bg-gray-800 transition"
-                >
-                  Go
-                </button>
-              </div>
-
-              {error && <p className="text-red-500 text-xs">{error}</p>}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Location hook ─────────────────────────────────────────────────────────────
 function useLocation() {
-  const [locationText, setLocationText] = useState(() => localStorage.getItem(LOC_LABEL_KEY) || "");
+  const [locationText, setLocationText] = useState("Detecting location…");
   const [showPicker, setShowPicker] = useState(false);
   const [manualInput, setManualInput] = useState("");
 
-  const applyLocation = (loc: SavedLocation) => {
-    setLocationText(loc.label);
-  };
+  useEffect(() => {
+    const saved = localStorage.getItem("qq_web_location");
+    if (saved) { setLocationText(saved); return; }
+    if (!navigator.geolocation) { setLocationText("Set your location"); return; }
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
+          );
+          const data = await res.json();
+          const addr = data.address;
+          const parts = [
+            addr.neighbourhood || addr.suburb || addr.village,
+            addr.city || addr.town || addr.county,
+          ].filter(Boolean);
+          const label = parts.slice(0, 2).join(", ") || data.display_name?.split(",")[0] || "Your location";
+          setLocationText(label);
+          localStorage.setItem("qq_web_location", label);
+        } catch {
+          setLocationText("Your location");
+        }
+      },
+      () => setLocationText("Set your location")
+    );
+  }, []);
 
   const saveManual = () => {
     const v = manualInput.trim();
     if (!v) return;
     setLocationText(v);
-    localStorage.setItem(LOC_LABEL_KEY, v);
+    localStorage.setItem("qq_web_location", v);
     setShowPicker(false);
     setManualInput("");
   };
 
-  return { locationText, showPicker, setShowPicker, manualInput, setManualInput, saveManual, applyLocation };
+  return { locationText, showPicker, setShowPicker, manualInput, setManualInput, saveManual };
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
 export default function HomePage({ onLoginClick }: Props) {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
-  const [offers, setOffers] = useState<any[]>([]);
-  const [banners, setBanners] = useState<any[]>([]);
-  const [bannerIndex, setBannerIndex] = useState(0);
-  const { emergency, homeTheme } = useAppConfig();
-  const [showLocationPrompt, setShowLocationPrompt] = useState(() => !getSavedLocation());
-
-  // Map category slug → admin-uploaded icon URL (fallback to SVG if empty)
-  const getAdminIconUrl = (slug: string): string => {
-    const k = slug.toLowerCase();
-    const ci = homeTheme.categoryIcons;
-    if (k.includes("ac")) return ci.acRepair ?? "";
-    if (k.includes("plumb")) return ci.plumbing ?? "";
-    if (k.includes("mehend") || k.includes("mehndi")) return ci.mehendi ?? "";
-    if (k.includes("electric")) return ci.electrician ?? "";
-    return "";
-  };
-
-  const renderCatIcon = (slug: string, size: number, color: string) => {
-    const url = getAdminIconUrl(slug);
-    if (url) return <img src={url} alt="" style={{ width: size, height: size, objectFit: "contain" }} />;
-    const Icon = getCatIcon(slug);
-    return <Icon size={size} color={color} />;
-  };
+  const [bookingDone, setBookingDone] = useState(false);
   const servicesRef = useRef<HTMLDivElement>(null);
 
   const loc = useLocation();
-
-  useEffect(() => {
-    client.get("/api/offers").then((res) => {
-      setOffers(Array.isArray(res.data?.offers) ? res.data.offers : []);
-    }).catch(() => {});
-    client.get("/api/banners?placement=home").then((res) => {
-      const rows = Array.isArray(res.data?.banners) ? res.data.banners : [];
-      setBanners(rows.filter((b: any) => b.isActive !== false && b.imageUrl));
-    }).catch(() => {});
-  }, []);
-
-  // Banner auto-rotate — respects per-banner displayDurationSeconds
-  useEffect(() => {
-    if (banners.length < 2) return;
-    const duration = (banners[bannerIndex]?.displayDurationSeconds ?? 5) * 1000;
-    const t = setTimeout(() => setBannerIndex((i) => (i + 1) % banners.length), duration);
-    return () => clearTimeout(t);
-  }, [banners, bannerIndex]);
 
   useEffect(() => {
     client.get("/api/services")
@@ -439,15 +254,6 @@ export default function HomePage({ onLoginClick }: Props) {
 
   return (
     <>
-      {showLocationPrompt && (
-        <LocationPromptModal
-          onDone={(savedLoc) => {
-            loc.applyLocation(savedLoc);
-            setShowLocationPrompt(false);
-          }}
-        />
-      )}
-
       {/* ── Black header ── */}
       <div className="bg-[#0A0A0A] px-4 pt-5 pb-5">
         <div className="max-w-6xl mx-auto">
@@ -497,61 +303,6 @@ export default function HomePage({ onLoginClick }: Props) {
       <div className="bg-bg min-h-screen">
         <div className="max-w-6xl mx-auto px-4 py-6">
 
-          {/* Emergency banner */}
-          {(emergency.emergencyLockdown || emergency.bookingsDisabled || emergency.paymentsFreezed) && (
-            <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3 mb-5 flex items-center gap-3">
-              <span className="text-xl shrink-0">🚫</span>
-              <p className="text-sm font-semibold text-red-700">
-                {emergency.emergencyLockdown
-                  ? "Platform is under maintenance. Please try again later."
-                  : emergency.bookingsDisabled
-                  ? "Bookings are temporarily unavailable. Please try again later."
-                  : "Payments are temporarily frozen. Please try again later."}
-              </p>
-            </div>
-          )}
-
-          {/* Banner carousel */}
-          {banners.length > 0 && (
-            <div className="relative w-full rounded-2xl overflow-hidden mb-5" style={{ aspectRatio: "3/1" }}>
-              {banners.map((b, i) => {
-                const inner = (
-                  <>
-                    <img src={b.imageUrl} alt={b.title || ""} className="w-full h-full object-cover" />
-                    {b.title && (
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-4">
-                        <p className="text-white font-bold text-base">{b.title}</p>
-                      </div>
-                    )}
-                  </>
-                );
-                return (
-                  <div
-                    key={b._id}
-                    className={`absolute inset-0 transition-opacity duration-700 ${i === bannerIndex ? "opacity-100" : "opacity-0"}`}
-                  >
-                    {b.linkUrl ? (
-                      <a href={b.linkUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
-                        {inner}
-                      </a>
-                    ) : inner}
-                  </div>
-                );
-              })}
-              {banners.length > 1 && (
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
-                  {banners.map((_, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setBannerIndex(i)}
-                      className={`w-1.5 h-1.5 rounded-full transition-all ${i === bannerIndex ? "bg-white w-4" : "bg-white/50"}`}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Category icon quick-row */}
           <h2 className="text-[17px] font-extrabold text-ink tracking-tight mb-4">What do you need?</h2>
           <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
@@ -563,6 +314,7 @@ export default function HomePage({ onLoginClick }: Props) {
                   </div>
                 ))
               : filteredCategories.map((cat) => {
+                  const Icon = getCatIcon(cat.slug);
                   const active = selectedCatId === cat.id;
                   return (
                     <button
@@ -575,7 +327,7 @@ export default function HomePage({ onLoginClick }: Props) {
                           ? "bg-ink shadow-lg scale-110 animate-float"
                           : "bg-white shadow-sm hover:-translate-y-2 hover:scale-110 hover:shadow-md"
                       }`}>
-                        {renderCatIcon(cat.slug, 26, active ? "#FFFFFF" : "#0A0A0A")}
+                        <Icon size={26} color={active ? "#FFFFFF" : "#0A0A0A"}/>
                       </div>
                       <span className={`text-[11px] font-bold text-center leading-tight tracking-tight transition-colors ${
                         active ? "text-ink" : "text-[#6B7280] group-hover:text-ink"
@@ -602,90 +354,6 @@ export default function HomePage({ onLoginClick }: Props) {
                   <span className="text-[11px] font-semibold text-ink whitespace-nowrap">{t.label}</span>
                 </div>
               ))}
-            </div>
-          )}
-
-          {/* ── Offers section ── */}
-          {offers.length > 0 && !search && (
-            <div className="mt-6">
-              <h2 className="text-[17px] font-extrabold text-ink tracking-tight mb-3">Offers & Deals</h2>
-              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
-                {offers.map((offer) => {
-                  const isBundle = offer.type === "bundle";
-                  const isCoupon = offer.type === "coupon";
-                  const accentColor = isBundle ? "#22A06B" : isCoupon ? "#7C3AED" : "#2563EB";
-                  const bgColor = isBundle ? "#F0FDF4" : isCoupon ? "#F5F3FF" : "#EFF6FF";
-                  const borderColor = isBundle ? "#BBF7D0" : isCoupon ? "#DDD6FE" : "#BFDBFE";
-                  const savings = isBundle && offer.originalPrice && offer.bundlePrice
-                    ? offer.originalPrice - offer.bundlePrice : null;
-
-                  return (
-                    <div
-                      key={offer._id}
-                      className="shrink-0 w-64 rounded-2xl border flex overflow-hidden"
-                      style={{ backgroundColor: bgColor, borderColor }}
-                    >
-                      {/* Accent strip */}
-                      <div className="w-1 shrink-0" style={{ backgroundColor: accentColor }} />
-
-                      <div className="p-3.5 flex-1">
-                        {/* Title row */}
-                        <div className="flex items-start justify-between gap-2 mb-1">
-                          <p className="font-bold text-[13px] text-ink leading-snug flex-1">{offer.title}</p>
-                          {offer.badgeText && (
-                            <span
-                              className="text-white text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0"
-                              style={{ backgroundColor: offer.badgeColor || accentColor }}
-                            >
-                              {offer.badgeText}
-                            </span>
-                          )}
-                        </div>
-
-                        {offer.tagline && (
-                          <p className="text-[11px] text-muted mb-2">{offer.tagline}</p>
-                        )}
-
-                        {/* Bundle pricing */}
-                        {isBundle && offer.bundlePrice != null && (
-                          <div className="flex items-center gap-2 mb-2.5">
-                            <span className="font-extrabold text-base" style={{ color: accentColor }}>₹{offer.bundlePrice}</span>
-                            {offer.originalPrice != null && (
-                              <span className="text-xs text-muted line-through">₹{offer.originalPrice}</span>
-                            )}
-                            {savings != null && savings > 0 && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: accentColor + "20", color: accentColor }}>
-                                Save ₹{savings}
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Coupon code box */}
-                        {isCoupon && offer.couponCode && (
-                          <div
-                            className="flex items-center justify-center rounded-lg border border-dashed py-2 mb-2"
-                            style={{ borderColor: accentColor + "60", backgroundColor: accentColor + "10" }}
-                          >
-                            <span className="font-extrabold text-sm tracking-widest" style={{ color: accentColor }}>
-                              {offer.couponCode}
-                            </span>
-                          </div>
-                        )}
-
-                        {/* Info description */}
-                        {!isBundle && !isCoupon && offer.description && (
-                          <p className="text-[11px] text-muted leading-relaxed line-clamp-2 mb-1">{offer.description}</p>
-                        )}
-
-                        {isCoupon && (
-                          <p className="text-[10px] text-muted">Apply this code at checkout</p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
             </div>
           )}
 
@@ -716,6 +384,7 @@ export default function HomePage({ onLoginClick }: Props) {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {filteredCategories.map((cat, index) => {
+                  const Icon = getCatIcon(cat.slug);
                   return (
                     <button
                       key={cat.id}
@@ -733,7 +402,7 @@ export default function HomePage({ onLoginClick }: Props) {
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center bg-gray-50">
-                            {renderCatIcon(cat.slug, 64, "#D1D5DB")}
+                            <Icon size={64} color="#D1D5DB"/>
                           </div>
                         )}
                         {/* Gradient overlay */}
@@ -791,6 +460,7 @@ export default function HomePage({ onLoginClick }: Props) {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                   {catServices.map((svc) => {
+                    const Icon = getCatIcon(catSlug(svc.category));
                     const img = svc.imageUrl?.trim() || "";
                     return (
                       <div key={svc._id} className="bg-white rounded-3xl overflow-hidden shadow-[0_2px_20px_rgba(0,0,0,0.06)] hover:shadow-[0_12px_40px_rgba(0,0,0,0.14)] hover:-translate-y-1 transition-all duration-300 flex flex-col group">
@@ -810,7 +480,7 @@ export default function HomePage({ onLoginClick }: Props) {
                           ) : null}
                           {/* Fallback icon — shown when no image or image fails */}
                           <div className={`absolute inset-0 flex items-center justify-center ${img ? "hidden" : ""}`}>
-                            {renderCatIcon(catSlug(svc.category), 52, "#D1D5DB")}
+                            <Icon size={52} color="#D1D5DB"/>
                           </div>
                           {/* Duration chip */}
                           {svc.duration && (
@@ -925,14 +595,20 @@ export default function HomePage({ onLoginClick }: Props) {
         <BookingModal
           service={selectedService}
           onClose={() => setSelectedService(null)}
-          onSuccess={(bookingId) => {
+          onSuccess={() => {
             setSelectedService(null);
-            navigate(`/bookings/${bookingId}`);
+            setBookingDone(true);
+            setTimeout(() => setBookingDone(false), 4000);
           }}
         />
       )}
 
       {/* ── Success toast ── */}
+      {bookingDone && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-primary text-white px-6 py-3 rounded-xl shadow-lg text-sm font-medium z-50 whitespace-nowrap">
+          Booking confirmed! Check My Bookings.
+        </div>
+      )}
     </>
   );
 }
