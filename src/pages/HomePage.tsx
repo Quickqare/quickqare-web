@@ -183,10 +183,14 @@ function LocationPromptModal({ onDone }: { onDone: (loc: SavedLocation) => void 
           setError("Could not detect address. Please enter your pincode.");
           return;
         }
-        // Validate serviceability if we got a pincode
+        // Validate serviceability if we got a pincode. Pass the precise GPS
+        // coords too so H3 mode matches the exact hub cell instead of the
+        // coarser pincode-centroid fallback.
         if (loc.pincode) {
           try {
-            const res = await client.get(`/api/zones/check?pincode=${loc.pincode}`);
+            const res = await client.get(
+              `/api/zones/check?pincode=${loc.pincode}&lat=${latitude}&lng=${longitude}`
+            );
             if (!res.data?.serviceable) {
               setStep("manual");
               setError(`Sorry, we don't serve ${loc.label} yet. Enter a nearby pincode!`);

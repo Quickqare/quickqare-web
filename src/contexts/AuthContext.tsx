@@ -8,7 +8,8 @@ type AuthCtx = {
   token: string | null;
   loading: boolean;
   sendOtp: (phone: string) => Promise<{ success: boolean; message: string }>;
-  verifyOtp: (phone: string, otp: string) => Promise<{ success: boolean; message: string }>;
+  verifyOtp: (phone: string, otp: string) => Promise<{ success: boolean; message: string; isNewUser?: boolean }>;
+  completeProfile: (name: string, gender: string) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 };
@@ -59,11 +60,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(u);
         localStorage.setItem("qq_web_token", t);
         localStorage.setItem("qq_web_user", JSON.stringify(u));
-        return { success: true, message: "" };
+        const isNewUser = u?.name === "User" || !u?.gender;
+        return { success: true, message: "", isNewUser };
       }
       return { success: false, message: res.data?.message ?? "Verification failed" };
     } catch (e: any) {
       return { success: false, message: e.response?.data?.message ?? e.message ?? "Verification failed" };
+    }
+  };
+
+  const completeProfile = async (name: string, gender: string) => {
+    try {
+      const res = await client.patch("/api/user/profile", { name, gender });
+      if (res.data?.success) {
+        const u = res.data.data?.user;
+        if (u) {
+          const mapped = { ...u, _id: u.id ?? u._id };
+          setUser(mapped as User);
+          localStorage.setItem("qq_web_user", JSON.stringify(mapped));
+        }
+        return { success: true };
+      }
+      return { success: false, message: res.data?.message };
+    } catch (e: any) {
+      return { success: false, message: e.response?.data?.message ?? "Failed to update profile" };
     }
   };
 
@@ -76,7 +96,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <Ctx.Provider value={{ user, token, loading, sendOtp, verifyOtp, logout, refreshUser }}>
+    <Ctx.Provider value={{ user, token, loading, sendOtp, verifyOtp, completeProfile, logout, refreshUser }}>
       {children}
     </Ctx.Provider>
   );
