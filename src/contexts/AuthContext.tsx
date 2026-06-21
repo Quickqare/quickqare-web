@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import client, { setToken } from "../api/client";
+import { resendWebOtp, sendWebOtp, verifyWebOtp } from "../services/msg91";
 
 type User = { _id: string; name: string; phone: string; email?: string; gender?: string };
 
@@ -8,6 +9,7 @@ type AuthCtx = {
   token: string | null;
   loading: boolean;
   sendOtp: (phone: string) => Promise<{ success: boolean; message: string }>;
+  resendOtp: (phone: string) => Promise<{ success: boolean; message: string }>;
   verifyOtp: (phone: string, otp: string) => Promise<{ success: boolean; message: string; isNewUser?: boolean }>;
   completeProfile: (name: string, gender: string) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
@@ -42,16 +44,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const sendOtp = async (phone: string) => {
     try {
-      await client.post("/api/auth/send-otp", { phone });
+      await sendWebOtp(phone);
       return { success: true, message: "" };
     } catch (e: any) {
-      return { success: false, message: e.response?.data?.message ?? e.message ?? "Failed to send OTP" };
+      return { success: false, message: e?.message ?? "Failed to send OTP" };
+    }
+  };
+
+  const resendOtp = async (phone: string) => {
+    try {
+      await resendWebOtp(phone);
+      return { success: true, message: "" };
+    } catch (e: any) {
+      return { success: false, message: e?.message ?? "Failed to resend OTP" };
     }
   };
 
   const verifyOtp = async (phone: string, otp: string) => {
     try {
-      const res = await client.post("/api/auth/verify-otp", { phone, otp });
+      // 1) Verify the OTP with the MSG91 widget to obtain a verified access token.
+      const accessToken = await verifyWebOtp(otp);
+      // 2) Exchange it server-side for an app JWT (also creates the user if new).
+      const res = await client.post("/api/auth/msg91/exchange", { phone, accessToken });
       if (res.data?.success) {
         const t = res.data.token;
         const u = res.data.user;
@@ -60,12 +74,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(u);
         localStorage.setItem("qq_web_token", t);
         localStorage.setItem("qq_web_user", JSON.stringify(u));
-        const isNewUser = u?.name === "User" || !u?.gender;
+        const isNewUser = res.data?.isNewUser === true || u?.name === "User" || !u?.gender;
         return { success: true, message: "", isNewUser };
       }
       return { success: false, message: res.data?.message ?? "Verification failed" };
     } catch (e: any) {
-      return { success: false, message: e.response?.data?.message ?? e.message ?? "Verification failed" };
+      return { success: false, message: e.response?.data?.message ?? e?.message ?? "Verification failed" };
     }
   };
 
@@ -96,7 +110,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <Ctx.Provider value={{ user, token, loading, sendOtp, verifyOtp, completeProfile, logout, refreshUser }}>
+    <Ctx.Provider value={{ user, token, loading, sendOtp, resendOtp, verifyOtp, completeProfile, logout, refreshUser }}>
       {children}
     </Ctx.Provider>
   );

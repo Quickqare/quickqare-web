@@ -8,7 +8,7 @@ const GENDERS = ["Male", "Female", "Other"];
 const RESEND_COOLDOWN = 60;
 
 export default function LoginModal({ onClose }: Props) {
-  const { sendOtp, verifyOtp, completeProfile } = useAuth();
+  const { sendOtp, resendOtp, verifyOtp, completeProfile } = useAuth();
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [name, setName] = useState("");
@@ -46,7 +46,7 @@ export default function LoginModal({ onClose }: Props) {
     setError("");
     setOtp("");
     setResending(true);
-    const res = await sendOtp(phone.replace(/\D/g, ""));
+    const res = await resendOtp(phone.replace(/\D/g, ""));
     setResending(false);
     if (res.success) setCooldown(RESEND_COOLDOWN);
     else setError(res.message || "Could not resend OTP.");
