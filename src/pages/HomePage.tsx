@@ -148,19 +148,17 @@ function persistLocation(loc: SavedLocation) {
 
 async function geocodePosition(latitude: number, longitude: number): Promise<SavedLocation | null> {
   try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
-    );
-    const data = await res.json();
-    const addr = data.address ?? {};
-    const parts = [
-      addr.neighbourhood || addr.suburb || addr.village,
-      addr.city || addr.town || addr.county,
-    ].filter(Boolean);
-    const label = parts.slice(0, 2).join(", ") || data.display_name?.split(",")[0] || "Your location";
-    const pincode = String(addr.postcode || "").replace(/\D/g, "").slice(0, 6);
-    const address = data.display_name || label;
-    return { address, pincode, latitude, longitude, label };
+    // Use the backend Google geocoder (same source as BookingModal and the
+    // mobile app) so pincode/serviceability is consistent and we don't hit
+    // Nominatim's public-server rate limits / usage policy from the browser.
+    const res = await client.get(`/api/maps/reverse?lat=${latitude}&lng=${longitude}`);
+    const loc = res.data?.location;
+    if (!loc) return null;
+    const pincode = String(loc.pincode || "").replace(/\D/g, "").slice(0, 6);
+    const address = String(loc.address || "").trim();
+    const parts = [loc.area, loc.city].map((p: any) => String(p || "").trim()).filter(Boolean);
+    const label = parts.slice(0, 2).join(", ") || address.split(",")[0] || "Your location";
+    return { address: address || label, pincode, latitude, longitude, label };
   } catch { return null; }
 }
 
@@ -699,10 +697,10 @@ export default function HomePage({ onLoginClick }: Props) {
           </h2>
 
           {loading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {[...Array(3)].map((_, i) => (
-                <div key={i} className="bg-white rounded-3xl overflow-hidden animate-pulse">
-                  <div className="w-full aspect-[3/2] bg-gray-200"/>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="bg-white rounded-2xl overflow-hidden animate-pulse">
+                  <div className="w-full aspect-[16/9] bg-gray-200"/>
                   <div className="p-4">
                     <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"/>
                     <div className="h-3 bg-gray-100 rounded w-1/2"/>
@@ -718,16 +716,16 @@ export default function HomePage({ onLoginClick }: Props) {
                 <p className="font-semibold text-ink">No results for "{search}"</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {filteredCategories.map((cat, index) => {
                   return (
                     <button
                       key={cat.id}
                       onClick={() => handleCatClick(cat)}
-                      className="bg-white rounded-3xl overflow-hidden shadow-[0_2px_20px_rgba(0,0,0,0.06)] hover:shadow-[0_12px_40px_rgba(0,0,0,0.14)] hover:-translate-y-1 transition-all duration-300 text-left group"
+                      className="bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 text-left group"
                     >
                       {/* Photo */}
-                      <div className="relative w-full aspect-[3/2] bg-gray-100 overflow-hidden">
+                      <div className="relative w-full aspect-[16/9] bg-gray-100 overflow-hidden">
                         {cat.imageUrl ? (
                           <img
                             src={cat.imageUrl}
@@ -744,26 +742,26 @@ export default function HomePage({ onLoginClick }: Props) {
                         <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent"/>
                         {/* Popular badge — first 2 */}
                         {index < 2 && (
-                          <div className="absolute top-3 left-3 bg-primary text-white text-[10px] font-bold px-2.5 py-1 rounded-full tracking-wide uppercase">
+                          <div className="absolute top-2 left-2 bg-primary text-white text-[9px] font-bold px-2 py-0.5 rounded-full tracking-wide uppercase">
                             Popular
                           </div>
                         )}
                         {/* Service count badge */}
-                        <div className="absolute top-3 right-3 bg-black/40 backdrop-blur-sm text-white text-[11px] font-semibold px-2.5 py-1 rounded-full">
+                        <div className="absolute top-2 right-2 bg-black/40 backdrop-blur-sm text-white text-[9px] font-semibold px-2 py-0.5 rounded-full">
                           {cat.services.length} service{cat.services.length !== 1 ? "s" : ""}
                         </div>
                         {/* Name + price overlay */}
-                        <div className="absolute bottom-3.5 left-4 right-4 flex items-end justify-between">
+                        <div className="absolute bottom-2 left-2.5 right-2.5 flex items-end justify-between">
                           <div>
-                            <p className="text-white font-extrabold text-[17px] tracking-tight leading-tight capitalize drop-shadow-sm">
+                            <p className="text-white font-extrabold text-[13px] tracking-tight leading-tight capitalize drop-shadow-sm">
                               {cat.name}
                             </p>
-                            <p className="text-white/70 text-xs mt-0.5">
+                            <p className="text-white/70 text-[10px] mt-0.5">
                               from ₹{cat.minPrice === Infinity ? "—" : cat.minPrice}
                             </p>
                           </div>
-                          <div className="w-7 h-7 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center group-hover:bg-white/40 transition-colors">
-                            <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <div className="w-5 h-5 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center group-hover:bg-white/40 transition-colors">
+                            <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7"/>
                             </svg>
                           </div>
@@ -793,13 +791,13 @@ export default function HomePage({ onLoginClick }: Props) {
                   <p>No services found</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {catServices.map((svc) => {
                     const img = svc.imageUrl?.trim() || "";
                     return (
-                      <div key={svc._id} className="bg-white rounded-3xl overflow-hidden shadow-[0_2px_20px_rgba(0,0,0,0.06)] hover:shadow-[0_12px_40px_rgba(0,0,0,0.14)] hover:-translate-y-1 transition-all duration-300 flex flex-col group">
+                      <div key={svc._id} className="bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col group">
                         {/* Photo */}
-                        <div className="relative w-full aspect-[4/3] bg-gray-50 overflow-hidden shrink-0">
+                        <div className="relative w-full aspect-[3/2] bg-gray-50 overflow-hidden shrink-0">
                           {img ? (
                             <img
                               src={img}
@@ -825,26 +823,26 @@ export default function HomePage({ onLoginClick }: Props) {
                         </div>
 
                         {/* Content */}
-                        <div className="p-4 flex flex-col flex-1">
+                        <div className="p-3 flex flex-col flex-1">
                           {svc.subCategory && typeof svc.subCategory === "object" && (
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-primary mb-1.5">
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-primary mb-1">
                               {svc.subCategory.name}
                             </span>
                           )}
-                          <h3 className="font-bold text-ink text-[15px] tracking-tight leading-snug mb-1">{svc.name}</h3>
+                          <h3 className="font-bold text-ink text-[13px] tracking-tight leading-snug mb-0.5">{svc.name}</h3>
                           {svc.description && (
-                            <p className="text-[13px] text-muted line-clamp-2 leading-relaxed flex-1 mb-3">{svc.description}</p>
+                            <p className="text-[11px] text-muted line-clamp-2 leading-relaxed flex-1 mb-2">{svc.description}</p>
                           )}
-                          <div className="flex items-center justify-between pt-3 border-t border-border mt-auto">
+                          <div className="flex items-center justify-between pt-2 border-t border-border mt-auto">
                             <div>
-                              <span className="text-[11px] text-muted">from </span>
-                              <span className="font-extrabold text-ink text-base">₹{svc.price}</span>
+                              <span className="text-[10px] text-muted">from </span>
+                              <span className="font-extrabold text-ink text-sm">₹{svc.price}</span>
                             </div>
                             <button
                               onClick={() => handleBookClick(svc)}
-                              className="btn-primary text-sm px-5 py-2"
+                              className="btn-primary text-xs px-3 py-1.5"
                             >
-                              Book Now
+                              Book
                             </button>
                           </div>
                         </div>
