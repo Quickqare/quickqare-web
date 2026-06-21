@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import client from "../api/client";
 
-/* ── Types matching Booking.js schema exactly ── */
 type BookingService = {
   serviceId: string;
   name: string;
@@ -14,18 +14,15 @@ type BookingService = {
 
 type Booking = {
   _id: string;
-  // Multi-service cart (new flow)
   services: BookingService[];
-  // Legacy single-service (old flow)
   serviceCategory?: string;
-  // Schedule
   scheduledDate: string;
   scheduledTime: string;
   estimatedDurationMinutes?: number;
-  // Location
   address?: string;
+  houseDetails?: string;
+  landmark?: string;
   pincode?: string;
-  // Pricing
   baseAmount: number;
   discountAmount?: number;
   couponCode?: string;
@@ -33,39 +30,45 @@ type Booking = {
   platformFeeAmount?: number;
   gstAmount?: number;
   totalAmount: number;
-  // Payment
   payment?: { status: "PENDING" | "PAID" | "FAILED" };
-  // Status
   status: string;
   cancelledBy?: "user" | "partner" | null;
+  refundAmount?: number;
+  refundStatus?: string;
   completedAt?: string;
-  // Assignment
-  assignmentStage?: number;
   createdAt: string;
 };
 
-/* ── Status display map ── */
+type CancelState =
+  | null
+  | "confirming"
+  | "cancelling"
+  | { percent: number; amount: number; status: string };
+
 type StatusCfg = { bg: string; text: string; dot: string; label: string };
 const STATUS_MAP: Record<string, StatusCfg> = {
-  PENDING_PAYMENT:     { bg: "bg-amber-50",   text: "text-amber-700",  dot: "bg-amber-400",  label: "Awaiting Payment" },
-  PENDING_ASSIGNMENT:  { bg: "bg-yellow-50",  text: "text-yellow-700", dot: "bg-yellow-400", label: "Finding Partner" },
-  QUEUED:              { bg: "bg-yellow-50",  text: "text-yellow-700", dot: "bg-yellow-400", label: "Queued" },
-  SEARCHING:           { bg: "bg-blue-50",    text: "text-blue-600",   dot: "bg-blue-400",   label: "Finding Partner" },
-  ASSIGNED:            { bg: "bg-indigo-50",  text: "text-indigo-700", dot: "bg-indigo-400", label: "Assigned" },
-  CONFIRMED:           { bg: "bg-blue-50",    text: "text-blue-700",   dot: "bg-blue-500",   label: "Confirmed" },
-  NO_PARTNER_AVAILABLE:{ bg: "bg-orange-50",  text: "text-orange-700", dot: "bg-orange-400", label: "No Partner Found" },
-  PARTNER_ACCEPTED:    { bg: "bg-indigo-50",  text: "text-indigo-700", dot: "bg-indigo-500", label: "Partner Accepted" },
-  ON_THE_WAY:          { bg: "bg-orange-50",  text: "text-orange-700", dot: "bg-orange-500", label: "On the Way" },
-  IN_PROGRESS:         { bg: "bg-orange-50",  text: "text-orange-700", dot: "bg-orange-500", label: "In Progress" },
-  COMPLETED:           { bg: "bg-green-50",   text: "text-green-700",  dot: "bg-green-500",  label: "Completed" },
-  CANCELLED:           { bg: "bg-red-50",     text: "text-red-700",    dot: "bg-red-400",    label: "Cancelled" },
+  PENDING_PAYMENT:      { bg: "bg-amber-50",   text: "text-amber-700",  dot: "bg-amber-400",  label: "Awaiting Payment" },
+  PENDING_ASSIGNMENT:   { bg: "bg-yellow-50",  text: "text-yellow-700", dot: "bg-yellow-400", label: "Finding Partner" },
+  QUEUED:               { bg: "bg-yellow-50",  text: "text-yellow-700", dot: "bg-yellow-400", label: "Queued" },
+  SEARCHING:            { bg: "bg-blue-50",    text: "text-blue-600",   dot: "bg-blue-400",   label: "Finding Partner" },
+  ASSIGNED:             { bg: "bg-indigo-50",  text: "text-indigo-700", dot: "bg-indigo-400", label: "Assigned" },
+  CONFIRMED:            { bg: "bg-blue-50",    text: "text-blue-700",   dot: "bg-blue-500",   label: "Confirmed" },
+  NO_PARTNER_AVAILABLE: { bg: "bg-orange-50",  text: "text-orange-700", dot: "bg-orange-400", label: "No Partner Found" },
+  PARTNER_ACCEPTED:     { bg: "bg-indigo-50",  text: "text-indigo-700", dot: "bg-indigo-500", label: "Partner Accepted" },
+  ON_THE_WAY:           { bg: "bg-orange-50",  text: "text-orange-700", dot: "bg-orange-500", label: "On the Way" },
+  ARRIVED:              { bg: "bg-orange-50",  text: "text-orange-700", dot: "bg-orange-500", label: "Arrived" },
+  IN_PROGRESS:          { bg: "bg-orange-50",  text: "text-orange-700", dot: "bg-orange-500", label: "In Progress" },
+  COMPLETED:            { bg: "bg-green-50",   text: "text-green-700",  dot: "bg-green-500",  label: "Completed" },
+  CANCELLED:            { bg: "bg-red-50",     text: "text-red-700",    dot: "bg-red-400",    label: "Cancelled" },
+  NEEDS_RESCHEDULING:   { bg: "bg-blue-50",   text: "text-blue-700",   dot: "bg-blue-400",   label: "⚠️ Reschedule Required" },
 };
+
+const NON_CANCELLABLE = new Set(["IN_PROGRESS", "COMPLETED", "CANCELLED"]);
 
 function getStatusCfg(status: string): StatusCfg {
   return STATUS_MAP[status] ?? { bg: "bg-gray-50", text: "text-gray-600", dot: "bg-gray-400", label: status };
 }
 
-/* ── Helpers ── */
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
@@ -92,7 +95,9 @@ function serviceTitle(b: Booking): string {
     if (b.services.length === 1) return b.services[0].name;
     return `${b.services[0].name} +${b.services.length - 1} more`;
   }
-  return b.serviceCategory ? b.serviceCategory.charAt(0).toUpperCase() + b.serviceCategory.slice(1) : "Service";
+  return b.serviceCategory
+    ? b.serviceCategory.charAt(0).toUpperCase() + b.serviceCategory.slice(1)
+    : "Service";
 }
 
 function serviceCategoryLabel(b: Booking): string | null {
@@ -102,14 +107,28 @@ function serviceCategoryLabel(b: Booking): string | null {
 }
 
 /* ── Booking Detail Panel ── */
-function BookingDetail({ b }: { b: Booking }) {
+function BookingDetail({
+  b,
+  cancelState,
+  onCancelClick,
+  onCancelConfirm,
+  onCancelAbort,
+}: {
+  b: Booking;
+  cancelState: CancelState;
+  onCancelClick: () => void;
+  onCancelConfirm: () => void;
+  onCancelAbort: () => void;
+}) {
   const hasDiscount = (b.discountAmount ?? 0) > 0 || (b.couponDiscountAmount ?? 0) > 0;
   const feesAndTaxes = (b.platformFeeAmount ?? 0) + (b.gstAmount ?? 0);
   const hasFeesAndTaxes = feesAndTaxes > 0;
   const discount = (b.discountAmount ?? 0) + (b.couponDiscountAmount ?? 0);
+  const canCancel = !NON_CANCELLABLE.has(b.status);
 
   return (
     <div className="border-t border-border mt-4 pt-4 space-y-4">
+
       {/* Services list */}
       {b.services?.length > 0 && (
         <div>
@@ -119,12 +138,8 @@ function BookingDetail({ b }: { b: Booking }) {
               <div key={i} className="flex justify-between items-start text-sm">
                 <div className="flex-1 min-w-0 pr-2">
                   <span className="text-ink">{s.name}</span>
-                  {s.quantity > 1 && (
-                    <span className="ml-1.5 text-muted text-xs">× {s.quantity}</span>
-                  )}
-                  {s.subCategory && (
-                    <span className="ml-1.5 text-xs text-primary">{s.subCategory}</span>
-                  )}
+                  {s.quantity > 1 && <span className="ml-1.5 text-muted text-xs">× {s.quantity}</span>}
+                  {s.subCategory && <span className="ml-1.5 text-xs text-primary">{s.subCategory}</span>}
                 </div>
                 <span className="text-ink shrink-0">₹{s.lineTotal?.toLocaleString("en-IN")}</span>
               </div>
@@ -139,17 +154,18 @@ function BookingDetail({ b }: { b: Booking }) {
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink">
           <span>📅 {fmtDate(b.scheduledDate)}</span>
           <span>🕐 {fmtTime(b.scheduledTime)}</span>
-          {b.estimatedDurationMinutes && (
-            <span>⏱ {fmtDuration(b.estimatedDurationMinutes)}</span>
-          )}
+          {b.estimatedDurationMinutes && <span>⏱ {fmtDuration(b.estimatedDurationMinutes)}</span>}
         </div>
       </div>
 
-      {/* Location */}
-      {(b.address || b.pincode) && (
+      {/* Address */}
+      {(b.address || b.pincode || b.houseDetails) && (
         <div>
           <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Address</p>
           <p className="text-sm text-ink">{b.address || "—"}</p>
+          {b.houseDetails && (
+            <p className="text-sm text-ink mt-0.5">{b.houseDetails}{b.landmark ? ` · ${b.landmark}` : ""}</p>
+          )}
           {b.pincode && <p className="text-xs text-muted mt-0.5">Pincode: {b.pincode}</p>}
         </div>
       )}
@@ -185,28 +201,87 @@ function BookingDetail({ b }: { b: Booking }) {
       {b.payment && (
         <div className="flex items-center gap-2 text-sm">
           <span className="text-muted">Payment:</span>
-          {b.payment.status === "PAID" && (
-            <span className="text-green-600 font-medium">✓ Paid</span>
-          )}
-          {b.payment.status === "PENDING" && (
-            <span className="text-amber-600 font-medium">⏳ Pending</span>
-          )}
-          {b.payment.status === "FAILED" && (
-            <span className="text-red-600 font-medium">✗ Failed</span>
+          {b.payment.status === "PAID"    && <span className="text-green-600 font-medium">✓ Paid</span>}
+          {b.payment.status === "PENDING" && <span className="text-amber-600 font-medium">⏳ Pending</span>}
+          {b.payment.status === "FAILED"  && <span className="text-red-600 font-medium">✗ Failed</span>}
+        </div>
+      )}
+
+      {/* Refund info (after cancellation) */}
+      {b.status === "CANCELLED" && b.refundAmount != null && (
+        <div className={`rounded-xl p-3 text-sm ${b.refundAmount > 0 ? "bg-green-50 border border-green-200" : "bg-gray-50 border border-border"}`}>
+          <p className="font-semibold text-ink mb-0.5">
+            {b.refundAmount > 0 ? `Refund: ₹${b.refundAmount.toLocaleString("en-IN")}` : "No refund applicable"}
+          </p>
+          {b.refundStatus && (
+            <p className="text-xs text-muted capitalize">{b.refundStatus.toLowerCase()} — will be credited within 5–7 business days</p>
           )}
         </div>
       )}
 
-      {/* Extra info */}
+      {/* Cancel section */}
+      {canCancel && (
+        <div className="border-t border-border pt-3">
+          {cancelState === null && (
+            <button
+              onClick={onCancelClick}
+              className="text-sm text-red-500 hover:text-red-700 font-medium transition"
+            >
+              Cancel Booking
+            </button>
+          )}
+
+          {cancelState === "confirming" && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 space-y-2">
+              <p className="text-sm font-semibold text-red-700">Cancel this booking?</p>
+              <p className="text-xs text-red-600">
+                Refund depends on how far in advance you cancel. More than 24h before → 100% refund.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={onCancelConfirm}
+                  className="px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 transition"
+                >
+                  Yes, cancel
+                </button>
+                <button
+                  onClick={onCancelAbort}
+                  className="px-4 py-1.5 border border-border text-xs font-semibold rounded-lg hover:border-ink transition"
+                >
+                  Keep booking
+                </button>
+              </div>
+            </div>
+          )}
+
+          {cancelState === "cancelling" && (
+            <div className="flex items-center gap-2 text-sm text-muted">
+              <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              Cancelling…
+            </div>
+          )}
+
+          {typeof cancelState === "object" && cancelState !== null && (
+            <div className={`rounded-xl p-3 text-sm ${cancelState.amount > 0 ? "bg-green-50 border border-green-200" : "bg-gray-50 border border-border"}`}>
+              <p className="font-semibold text-ink">Booking cancelled</p>
+              {cancelState.amount > 0 ? (
+                <p className="text-xs text-green-700 mt-0.5">
+                  Refund of ₹{cancelState.amount.toLocaleString("en-IN")} ({cancelState.percent}%) will be credited within 5–7 business days.
+                </p>
+              ) : (
+                <p className="text-xs text-muted mt-0.5">No refund applicable for this cancellation.</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Meta */}
       <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted border-t border-border pt-3">
         <span>Booking ID: {b._id.slice(-8).toUpperCase()}</span>
         <span>Booked on {fmtDate(b.createdAt)}</span>
-        {b.cancelledBy && (
-          <span className="text-red-500">Cancelled by {b.cancelledBy}</span>
-        )}
-        {b.completedAt && (
-          <span>Completed on {fmtDate(b.completedAt)}</span>
-        )}
+        {b.cancelledBy && <span className="text-red-500">Cancelled by {b.cancelledBy}</span>}
+        {b.completedAt && <span>Completed on {fmtDate(b.completedAt)}</span>}
       </div>
     </div>
   );
@@ -218,6 +293,7 @@ export default function MyBookingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [cancelStates, setCancelStates] = useState<Record<string, CancelState>>({});
 
   useEffect(() => {
     client
@@ -239,6 +315,30 @@ export default function MyBookingsPage() {
     });
   }
 
+  function setCancelState(id: string, state: CancelState) {
+    setCancelStates((prev) => ({ ...prev, [id]: state }));
+  }
+
+  async function handleCancelConfirm(bookingId: string) {
+    setCancelState(bookingId, "cancelling");
+    try {
+      const res = await client.patch(`/api/booking/user/cancel/${bookingId}`);
+      const refund = res.data?.refund ?? { percent: 0, amount: 0, status: "NONE" };
+      setCancelState(bookingId, { percent: refund.percent, amount: refund.amount, status: refund.status });
+      // Update booking status in list
+      setBookings((prev) =>
+        prev.map((b) =>
+          b._id === bookingId
+            ? { ...b, status: "CANCELLED", cancelledBy: "user", refundAmount: refund.amount, refundStatus: refund.status }
+            : b
+        )
+      );
+    } catch (e: any) {
+      setCancelState(bookingId, null);
+      alert(e.response?.data?.message || "Could not cancel booking. Please try again.");
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -256,9 +356,7 @@ export default function MyBookingsPage() {
         </p>
       </div>
 
-      {error && (
-        <div className="card p-4 text-red-600 text-sm mb-6">{error}</div>
-      )}
+      {error && <div className="card p-4 text-red-600 text-sm mb-6">{error}</div>}
 
       {bookings.length === 0 && !error ? (
         <div className="text-center py-20 text-muted">
@@ -273,6 +371,7 @@ export default function MyBookingsPage() {
             const isOpen = expanded.has(b._id);
             const title = serviceTitle(b);
             const cat = serviceCategoryLabel(b);
+            const cancelState = cancelStates[b._id] ?? null;
 
             return (
               <div key={b._id} className="card p-5">
@@ -281,18 +380,14 @@ export default function MyBookingsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <h3 className="font-semibold text-ink">{title}</h3>
-                      {cat && (
-                        <span className="badge bg-primary/10 text-primary text-xs">{cat}</span>
-                      )}
+                      {cat && <span className="badge bg-primary/10 text-primary text-xs">{cat}</span>}
                     </div>
                     <p className="text-sm text-muted">
                       {fmtDate(b.scheduledDate)}
                       {b.scheduledTime ? ` · ${fmtTime(b.scheduledTime)}` : ""}
                       {b.estimatedDurationMinutes ? ` · ${fmtDuration(b.estimatedDurationMinutes)}` : ""}
                     </p>
-                    {b.address && (
-                      <p className="text-sm text-muted mt-0.5 truncate">{b.address}</p>
-                    )}
+                    {b.address && <p className="text-sm text-muted mt-0.5 truncate">{b.address}</p>}
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
                     <span className={`badge ${cfg.bg} ${cfg.text} flex items-center gap-1.5`}>
@@ -305,16 +400,34 @@ export default function MyBookingsPage() {
                   </div>
                 </div>
 
-                {/* Expand toggle */}
-                <button
-                  onClick={() => toggleExpand(b._id)}
-                  className="mt-3 text-xs text-primary font-medium flex items-center gap-1 hover:underline"
-                >
-                  {isOpen ? "▲ Hide details" : "▼ View details"}
-                </button>
+                {/* Action row */}
+                <div className="flex items-center gap-4 mt-3">
+                  <button
+                    onClick={() => toggleExpand(b._id)}
+                    className="text-xs text-primary font-medium flex items-center gap-1 hover:underline"
+                  >
+                    {isOpen ? "▲ Hide details" : "▼ View details"}
+                  </button>
+                  {!["COMPLETED", "CANCELLED", "PENDING_PAYMENT"].includes(b.status) && (
+                    <Link
+                      to={`/bookings/${b._id}`}
+                      className="text-xs text-primary font-medium hover:underline"
+                    >
+                      Live status →
+                    </Link>
+                  )}
+                </div>
 
                 {/* Detail panel */}
-                {isOpen && <BookingDetail b={b} />}
+                {isOpen && (
+                  <BookingDetail
+                    b={b}
+                    cancelState={cancelState}
+                    onCancelClick={() => setCancelState(b._id, "confirming")}
+                    onCancelConfirm={() => handleCancelConfirm(b._id)}
+                    onCancelAbort={() => setCancelState(b._id, null)}
+                  />
+                )}
               </div>
             );
           })}
