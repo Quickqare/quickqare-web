@@ -30,10 +30,12 @@ type Booking = {
   estimateTotal?: number;
   etaMinutes?: number;
   cancelledBy?: string;
+  cancelReason?: string;
   refundAmount?: number;
   refundStatus?: string;
   payment?: { status: string };
   rescheduleReason?: string;
+  partnerReportedIssue?: string | null;
 };
 
 const STATUS_STEPS: { status: BookingStatus; label: string; icon: string }[] = [
@@ -73,6 +75,9 @@ export default function BookingStatusPage() {
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [rescheduling, setRescheduling] = useState(false);
+  const [liveSlots, setLiveSlots] = useState<{ start: string; label: string }[]>([]);
+  const [slotLoading, setSlotLoading] = useState(false);
+  const [slotError, setSlotError] = useState("");
   const socketRef = useRef<Socket | null>(null);
 
   // Fetch booking
@@ -104,7 +109,17 @@ export default function BookingStatusPage() {
         etaMinutes: data.etaMinutes ?? prev.etaMinutes,
         partner: data.partner ?? prev.partner,
         rescheduleReason: data.rescheduleReason ?? prev.rescheduleReason,
+        partnerReportedIssue: data.partnerReportedIssue ?? prev.partnerReportedIssue,
+        ...(data.cancelledBy ? { cancelledBy: data.cancelledBy } : {}),
+        ...(data.cancelReason ? { cancelReason: data.cancelReason } : {}),
+        ...(data.refundAmount != null ? { refundAmount: data.refundAmount } : {}),
       } : prev);
+      // Refetch on CANCELLED so refundAmount / refundStatus / cancelledBy are accurate from DB
+      if (data.status === "CANCELLED") {
+        client.get(`/api/booking/${bookingId}`)
+          .then((r) => setBooking(r.data?.booking ?? r.data))
+          .catch(() => {});
+      }
     });
 
     return () => { socket.disconnect(); };
@@ -137,6 +152,25 @@ export default function BookingStatusPage() {
     }
   };
 
+  // Cancel after the partner has arrived — no refund (the professional travelled
+  // and reached the location). Distinct from the time-based cancel above.
+  const handleCancelArrived = async () => {
+    setCancelState("cancelling");
+    try {
+      await client.patch(`/api/booking/user/cancel/${bookingId}`, {
+        reason: "Customer cancelled after professional arrived",
+      });
+      setBooking((prev) => prev ? {
+        ...prev, status: "CANCELLED", cancelledBy: "user",
+        refundAmount: 0, refundStatus: "NONE",
+      } : prev);
+      setCancelState("idle");
+    } catch (e: any) {
+      alert(e.response?.data?.message || "Could not cancel.");
+      setCancelState("idle");
+    }
+  };
+
   if (loading) return (
     <div className="min-h-[60vh] flex items-center justify-center">
       <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
@@ -153,6 +187,53 @@ export default function BookingStatusPage() {
   const isCancellable = !["IN_PROGRESS", "COMPLETED", "CANCELLED", "NEEDS_RESCHEDULING"].includes(booking.status);
   const isNeedsRescheduling = booking.status === "NEEDS_RESCHEDULING";
 
+  // Live slot availability — same endpoint the booking flow uses, so the
+  // customer can only pick a slot that actually has a free partner.
+  const fetchAvailableSlots = async (date: string) => {
+    if (!date || !booking) return;
+    const services = (booking.services || [])
+      .map((s: any) => (s.serviceId ? { serviceId: String(s.serviceId), quantity: s.quantity || 1 } : null))
+      .filter(Boolean);
+    const coords = (booking as any).location?.coordinates; // [lng, lat]
+    setSlotLoading(true);
+    setSlotError("");
+    try {
+      const res = await client.post("/api/booking/available-slots", {
+        date,
+        services,
+        serviceCategory: booking.serviceCategory,
+        pincode: booking.pincode || undefined,
+        latitude: Array.isArray(coords) ? coords[1] : undefined,
+        longitude: Array.isArray(coords) ? coords[0] : undefined,
+      });
+      const rows: any[] = Array.isArray(res.data?.slots) ? res.data.slots : [];
+      const mapped = rows
+        .map((slot) => {
+          const start = String(slot?.time || "").trim();
+          if (!start) return null;
+          const [hh, mm] = start.split(":").map((v: string) => Number(v) || 0);
+          const end = new Date();
+          end.setHours(hh, mm + 60, 0, 0);
+          const endStr = `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
+          return { start, label: `${start} - ${endStr}` };
+        })
+        .filter(Boolean) as { start: string; label: string }[];
+      setLiveSlots(mapped);
+      if (!mapped.length) setSlotError("No slots available for this date. Please pick another date.");
+    } catch (e: any) {
+      setLiveSlots([]);
+      setSlotError(e.response?.data?.message || "Couldn't load available slots. Please try another date.");
+    } finally {
+      setSlotLoading(false);
+    }
+  };
+
+  const handleSelectRescheduleDate = (date: string) => {
+    setRescheduleDate(date);
+    setRescheduleTime("");
+    fetchAvailableSlots(date);
+  };
+
   const handleReschedule = async () => {
     if (!rescheduleDate || !rescheduleTime) { alert("Please select a date and time."); return; }
     setRescheduling(true);
@@ -167,6 +248,13 @@ export default function BookingStatusPage() {
     } finally {
       setRescheduling(false);
     }
+  };
+
+  // Cancelling from a reschedule is the company's fault, so the backend grants a
+  // full refund. Distinct messaging from the normal time-based cancel.
+  const handleCancelReschedule = async () => {
+    if (!window.confirm("Since we couldn't complete your booking, you'll receive a full refund. Cancel instead of rescheduling?")) return;
+    await handleCancel();
   };
   const serviceName = booking.services?.length
     ? (booking.services.length === 1 ? booking.services[0].name : `${booking.services[0].name} +${booking.services.length - 1} more`)
@@ -211,36 +299,60 @@ export default function BookingStatusPage() {
                 We'd like to reschedule your service at no extra charge.
               </p>
             )}
-            <p className="text-xs font-semibold text-blue-600 mb-2">Select a new date and time:</p>
-            <div className="flex gap-2 mb-3">
-              <input
-                type="date"
-                className="flex-1 border border-blue-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
-                value={rescheduleDate}
-                min={new Date().toISOString().split("T")[0]}
-                onChange={(e) => setRescheduleDate(e.target.value)}
-              />
-              <select
-                className="flex-1 border border-blue-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
-                value={rescheduleTime}
-                onChange={(e) => setRescheduleTime(e.target.value)}
-              >
-                <option value="">Select time</option>
-                {["08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00"].map((t) => (
-                  <option key={t} value={t}>
-                    {Number(t.split(":")[0]) >= 12
-                      ? `${Number(t.split(":")[0]) === 12 ? 12 : Number(t.split(":")[0]) - 12}:00 PM`
-                      : `${Number(t.split(":")[0])}:00 AM`}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <p className="text-xs font-semibold text-blue-600 mb-2">Select a new date:</p>
+            <input
+              type="date"
+              className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 mb-3"
+              value={rescheduleDate}
+              min={new Date(Date.now() + 86400000).toISOString().split("T")[0]}
+              onChange={(e) => handleSelectRescheduleDate(e.target.value)}
+            />
+            {rescheduleDate && (
+              <>
+                <p className="text-xs font-semibold text-blue-600 mb-2">Select a time slot:</p>
+                {slotLoading ? (
+                  <p className="text-sm text-blue-700 mb-3">Checking available slots…</p>
+                ) : slotError ? (
+                  <p className="text-sm text-red-600 mb-3">{slotError}</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {liveSlots.map((slot) => (
+                      <button
+                        key={slot.start}
+                        onClick={() => setRescheduleTime(slot.start)}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition ${
+                          rescheduleTime === slot.start
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : "bg-white text-blue-700 border-blue-200 hover:border-blue-400"
+                        }`}
+                      >
+                        {slot.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
             <button
               onClick={handleReschedule}
               disabled={rescheduling || !rescheduleDate || !rescheduleTime}
               className="w-full py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition disabled:opacity-50"
             >
               {rescheduling ? "Rescheduling…" : "Confirm New Slot"}
+            </button>
+
+            <div className="flex items-center gap-2 my-3">
+              <div className="flex-1 h-px bg-blue-200" />
+              <span className="text-xs text-blue-500">or</span>
+              <div className="flex-1 h-px bg-blue-200" />
+            </div>
+
+            <button
+              onClick={handleCancelReschedule}
+              disabled={cancelState === "cancelling"}
+              className="w-full py-2.5 border border-red-300 text-red-600 text-sm font-bold rounded-xl hover:bg-red-50 transition disabled:opacity-50"
+            >
+              {cancelState === "cancelling" ? "Cancelling…" : "Cancel & Get Full Refund"}
             </button>
           </div>
         )}
@@ -288,13 +400,45 @@ export default function BookingStatusPage() {
         </div>
       ) : (
         <div className="card p-5 mb-4">
-          <p className="font-semibold text-red-600 mb-1">Booking Cancelled</p>
-          {booking.cancelledBy && <p className="text-sm text-muted">Cancelled by {booking.cancelledBy}</p>}
-          {booking.refundAmount != null && booking.refundAmount > 0 && (
+          {typeof booking.cancelReason === "string" && booking.cancelReason.includes("No replacement partner") ? (
+            <>
+              <p className="font-semibold text-red-600 mb-1">😔 We couldn't find a professional</p>
+              <p className="text-sm text-muted mb-1">
+                Our partner cancelled and we were unable to find a replacement for your slot. We're sorry for the inconvenience.
+              </p>
+            </>
+          ) : (
+            <p className="font-semibold text-red-600 mb-1">Booking Cancelled</p>
+          )}
+          {booking.refundAmount != null && booking.refundAmount > 0 ? (
             <p className="text-sm text-green-600 mt-1">
               Refund of ₹{booking.refundAmount.toLocaleString("en-IN")} — {booking.refundStatus?.toLowerCase() ?? "pending"}
             </p>
+          ) : (
+            <p className="text-sm text-muted mt-1">No refund applicable for this cancellation.</p>
           )}
+        </div>
+      )}
+
+      {/* Partner arrived but customer not ready */}
+      {booking.status === "ARRIVED" && booking.partnerReportedIssue && (
+        <div className="card p-5 mb-4 border-amber-300 bg-amber-50">
+          <p className="font-semibold text-amber-800 mb-1">📍 Your professional has arrived</p>
+          <p className="text-sm text-amber-900 mb-2 leading-relaxed">
+            {booking.partnerReportedIssue === "CUSTOMER_ASKED_LATER"
+              ? "We noted you asked them to come later. They can't wait at your location — if you can't proceed now, you can cancel below."
+              : "They couldn't reach you at your location. If you can't proceed now, you can cancel below."}
+          </p>
+          <p className="text-xs font-semibold text-amber-700 mb-3">
+            Note: no refund applies after the professional has arrived.
+          </p>
+          <button
+            onClick={handleCancelArrived}
+            disabled={cancelState === "cancelling"}
+            className="w-full py-2.5 bg-red-600 text-white text-sm font-bold rounded-xl hover:bg-red-700 transition disabled:opacity-50"
+          >
+            {cancelState === "cancelling" ? "Cancelling…" : "Cancel Booking (No Refund)"}
+          </button>
         </div>
       )}
 
@@ -345,9 +489,13 @@ export default function BookingStatusPage() {
             {cancelState === "confirming" && (
               <div className="card p-4 border-red-200">
                 <p className="text-sm font-semibold text-red-700 mb-1">Cancel this booking?</p>
-                <p className="text-xs text-muted mb-3">Refund depends on how far ahead you cancel (100% if &gt;24h before service).</p>
+                <p className="text-xs text-muted mb-3">
+                  {booking.status === "ARRIVED"
+                    ? "Your professional has already reached your location — no refund applies if you cancel now."
+                    : "Refund depends on how far ahead you cancel (100% if >24h before service)."}
+                </p>
                 <div className="flex gap-2">
-                  <button onClick={handleCancel} className="px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition">
+                  <button onClick={booking.status === "ARRIVED" ? handleCancelArrived : handleCancel} className="px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition">
                     Yes, cancel
                   </button>
                   <button onClick={() => setCancelState("idle")} className="px-4 py-2 border border-border text-xs font-bold rounded-lg hover:border-ink transition">

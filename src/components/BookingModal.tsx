@@ -2,14 +2,21 @@ import { useCallback, useEffect, useState } from "react";
 import client from "../api/client";
 import { useAppConfig } from "../hooks/useAppConfig";
 import { getSavedLocation } from "../pages/HomePage";
+import { getCartItemTotal } from "../utils/mehendiPricing";
 
-type Service = {
-  _id: string;
+export type CartItem = {
+  cartKey: string;
+  serviceId: string;
   name: string;
   price: number;
-  category?: { name: string } | string | null;
+  quantity: number;
+  pricingKey?: string | null;
+  parentName?: string;
+  sectionTitle?: string;
+  category?: string;
 };
-type Props = { service: Service; onClose: () => void; onSuccess: (bookingId: string) => void };
+
+type Props = { cart: CartItem[]; onClose: () => void; onSuccess: (bookingId: string) => void };
 
 const TIME_SLOTS: { value: string; label: string }[] = [
   { value: "08:00", label: "8:00 AM" },
@@ -27,45 +34,13 @@ const TIME_SLOTS: { value: string; label: string }[] = [
 
 const LABEL_ICONS: Record<string, string> = { Home: "🏠", Work: "💼", Other: "📍" };
 
-// ─── Mehendi hands pricing (mirrors mobile mehendiPricing.ts) ─────────────────
-const FEET_NAMES = new Set(["feet","basic feet","ankle","above ankle","mid leg","below knee"]);
-
-function getMehendiPricingKey(name: string): string | null {
-  const n = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  if (n.includes("minimal mehendi"))              return "minimal";
-  if (n.includes("palm length mehendi"))          return "palm";
-  if (n.includes("bangle length mehendi"))        return "bangle";
-  if (n.includes("mid length mehendi"))           return "mid";
-  if (n.includes("elbow length bridal mehendi"))  return "elbow_bridal";
-  if (n.includes("above elbow bridal mehendi"))   return "above_elbow_bridal";
-  return null;
-}
-
-function getMehendiHandsPrice(key: string | null, hands: number): number | null {
-  const q = Math.max(hands, 1);
-  if (key === "minimal")           return [0,399,699,999,1199][q] ?? q * 299;
-  if (key === "palm")              return [0,499,798,1149,1499][q] ?? q * 399;
-  if (key === "bangle")            return [0,799,1199,1699,2199][q] ?? Math.round(q * 599 * 0.95);
-  if (key === "mid")               return [0,999,1499,2099,2599][q] ?? q * 629;
-  if (key === "elbow_bridal")      return [0,1799,3000][q] ?? Math.round(q * 1799 * 0.75);
-  if (key === "above_elbow_bridal")return [0,2000,3500][q] ?? null;
-  return null;
-}
-
-function isMehendiHandService(name: string): boolean {
-  const n = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  if (!n.includes("mehendi")) return false;
-  if (FEET_NAMES.has(n)) return false;
-  return getMehendiPricingKey(name) !== null;
-}
-
 function todayISO() {
   return new Date().toISOString().split("T")[0];
 }
 
 declare const Razorpay: any;
 
-export default function BookingModal({ service, onClose, onSuccess }: Props) {
+export default function BookingModal({ cart, onClose, onSuccess }: Props) {
   const [date, setDate] = useState(todayISO());
   const [time, setTime] = useState("");
   const [address, setAddress] = useState("");
@@ -96,12 +71,9 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
   const [error, setError] = useState("");
   const [step, setStep] = useState<"form" | "paying">("form");
 
-  const isMehendi = isMehendiHandService(service.name);
-  const mehendiKey = getMehendiPricingKey(service.name);
-  const [handsCount, setHandsCount] = useState(1);
-  const mehendiPrice = isMehendi ? (getMehendiHandsPrice(mehendiKey, handsCount) ?? service.price * handsCount) : service.price;
-  const mehendiSinglePrice = isMehendi ? (getMehendiHandsPrice(mehendiKey, 1) ?? service.price) : service.price;
-  const mehendiDiscount = isMehendi && handsCount > 1 ? Math.max((mehendiSinglePrice * handsCount) - mehendiPrice, 0) : 0;
+  const basePrice = cart.reduce((sum, item) => sum + getCartItemTotal(item, cart), 0);
+  const serviceIds = cart.map((i) => i.serviceId).filter(Boolean);
+  const firstItem = cart[0];
 
   const isLoggedIn = Boolean(localStorage.getItem("qq_web_token"));
 
@@ -132,7 +104,6 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
   // Fetch available slots — only when we have a valid 6-digit pincode
   const fetchSlots = useCallback(async (forDate: string, forPincode: string) => {
     if (!forPincode || forPincode.length !== 6) {
-      // No pincode yet — show all slots as selectable, don't hit the backend
       setAvailableSlotTimes(null);
       return;
     }
@@ -141,7 +112,7 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
     try {
       const res = await client.post("/api/booking/available-slots", {
         date: forDate,
-        services: [{ serviceId: service._id, quantity: isMehendi ? handsCount : 1 }],
+        services: cart.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })),
         pincode: forPincode,
       });
       const slots: any[] = Array.isArray(res.data?.slots) ? res.data.slots : [];
@@ -151,12 +122,13 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
         setNotServiceable(true);
         setAvailableSlotTimes([]);
       } else {
-        setAvailableSlotTimes(null); // generic error → show all slots
+        setAvailableSlotTimes(null);
       }
     } finally {
       setSlotsLoading(false);
     }
-  }, [service._id, isMehendi, handsCount]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(cart)]);
 
   // Re-fetch slots when date changes (only if pincode already known)
   useEffect(() => {
@@ -172,15 +144,6 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
     if (pincode.length === 6) fetchSlots(date, pincode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pincode]);
-
-  // Re-fetch slots when hands count changes for mehendi (capacity differs per quantity)
-  useEffect(() => {
-    if (isMehendi && pincode.length === 6) {
-      setTime("");
-      fetchSlots(date, pincode);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handsCount]);
 
   const applyAddress = (addr: any) => {
     setAddress(addr.address || "");
@@ -249,7 +212,7 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
 
   const { pricing } = useAppConfig();
   const discount = appliedCoupon?.discount ?? 0;
-  const taxableAmount = Math.max(service.price - discount, 0);
+  const taxableAmount = Math.max(basePrice - discount, 0);
   const platformFeeAmount = Math.round(
     (taxableAmount * (pricing.platformFeePercent ?? 0)) / 100 +
     (pricing.platformFeeFlatInr ?? 0)
@@ -267,8 +230,8 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
     try {
       const res = await client.post("/api/coupons/apply", {
         code,
-        amount: service.price,
-        serviceIds: [service._id],
+        amount: basePrice,
+        serviceIds,
       });
       if (res.data?.success) {
         setAppliedCoupon({ code, discount: res.data.discount });
@@ -295,7 +258,7 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
     setShowCoupons(true);
     setCouponsLoading(true);
     try {
-      const res = await client.get(`/api/coupons/available?amount=${service.price}&serviceIds=${service._id}`);
+      const res = await client.get(`/api/coupons/available?amount=${basePrice}&serviceIds=${serviceIds.join(",")}`);
       setAvailableCoupons(Array.isArray(res.data?.coupons) ? res.data.coupons : []);
     } catch { } finally { setCouponsLoading(false); }
   };
@@ -317,7 +280,7 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
 
     try {
       const bookingRes = await client.post("/api/booking/create", {
-        services: [{ serviceId: service._id, quantity: isMehendi ? handsCount : 1 }],
+        services: cart.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })),
         scheduledDate: date,
         scheduledTime: time,
         address: address.trim(),
@@ -366,7 +329,7 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
         currency: order.currency || "INR",
         order_id: order.id,
         name: "QuickQare",
-        description: service.name,
+        description: firstItem?.name ?? "QuickQare Service",
         theme: { color: "#22A06B" },
         handler: async (response: any) => {
           try {
@@ -409,7 +372,11 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
         <div className="flex items-start justify-between mb-5">
           <div>
             <h2 className="text-lg font-bold text-ink">Book Service</h2>
-            <p className="text-sm text-muted mt-0.5">{service.name}</p>
+            <p className="text-sm text-muted mt-0.5">
+              {cart.length === 1
+                ? firstItem?.name
+                : `${cart.length} services · ₹${basePrice.toLocaleString("en-IN")}`}
+            </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-ink text-2xl leading-none ml-4">×</button>
         </div>
@@ -422,43 +389,15 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
         ) : (
           <div className="space-y-4">
 
-            {/* Mehendi hands selector */}
-            {isMehendi && (
-              <div>
-                <label className="block text-sm font-medium text-ink mb-1.5">Number of Hands</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {[1, 2, 3, 4].map((h) => {
-                    const price = getMehendiHandsPrice(mehendiKey, h) ?? service.price * h;
-                    const originalPrice = mehendiSinglePrice * h;
-                    const hasDiscount = h > 1 && price < originalPrice;
-                    return (
-                      <button
-                        key={h}
-                        onClick={() => setHandsCount(h)}
-                        className={`py-2.5 px-2 rounded-lg border transition flex flex-col items-center gap-0.5 ${
-                          handsCount === h
-                            ? "border-primary bg-primary text-white"
-                            : "border-border text-ink hover:border-primary"
-                        }`}
-                      >
-                        <span className="text-sm font-semibold">{h} {h === 1 ? "Hand" : "Hands"}</span>
-                        <span className={`text-xs font-medium ${handsCount === h ? "text-white/80" : "text-muted"}`}>
-                          ₹{price}
-                        </span>
-                        {hasDiscount && (
-                          <span className={`text-[9px] font-bold ${handsCount === h ? "text-green-200" : "text-green-600"}`}>
-                            Save ₹{originalPrice - price}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                {mehendiDiscount > 0 && (
-                  <p className="text-xs text-green-600 font-medium mt-2">
-                    🎉 You save ₹{mehendiDiscount} by booking both hands together!
-                  </p>
-                )}
+            {/* Cart summary (when multiple items) */}
+            {cart.length > 1 && (
+              <div className="bg-gray-50 rounded-xl p-3 space-y-1">
+                {cart.map((item) => (
+                  <div key={item.cartKey} className="flex items-center justify-between text-sm">
+                    <span className="text-ink">{item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ""}</span>
+                    <span className="font-semibold text-ink">₹{getCartItemTotal(item, cart).toLocaleString("en-IN")}</span>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -734,7 +673,7 @@ export default function BookingModal({ service, onClose, onSuccess }: Props) {
             <div className="bg-gray-50 rounded-xl p-3 space-y-1.5">
               <div className="flex justify-between text-sm">
                 <span className="text-muted">Service price</span>
-                <span className="font-semibold text-ink">₹{service.price.toLocaleString("en-IN")}</span>
+                <span className="font-semibold text-ink">₹{basePrice.toLocaleString("en-IN")}</span>
               </div>
               {discount > 0 && (
                 <div className="flex justify-between text-sm">

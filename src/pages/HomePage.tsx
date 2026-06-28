@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import client from "../api/client";
-import BookingModal from "../components/BookingModal";
 import { useAppConfig } from "../hooks/useAppConfig";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -319,8 +318,6 @@ export default function HomePage({ onLoginClick }: Props) {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
-  const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [offers, setOffers] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
   const [bannerIndex, setBannerIndex] = useState(0);
@@ -344,7 +341,7 @@ export default function HomePage({ onLoginClick }: Props) {
     const Icon = getCatIcon(slug);
     return <Icon size={size} color={color} />;
   };
-  const servicesRef = useRef<HTMLDivElement>(null);
+  const servicesRef = useRef<HTMLDivElement | null>(null);
 
   const loc = useLocation();
 
@@ -416,27 +413,9 @@ export default function HomePage({ onLoginClick }: Props) {
       )
     : categories;
 
-  // Services within selected category (filtered by search)
-  const selectedCat = categories.find((c) => c.id === selectedCatId) ?? null;
-  const catServices = selectedCat
-    ? (q
-        ? selectedCat.services.filter(
-            (s) =>
-              s.name.toLowerCase().includes(q) ||
-              (s.description ?? "").toLowerCase().includes(q)
-          )
-        : selectedCat.services)
-    : [];
-
   const handleCatClick = (cat: GroupedCategory) => {
-    setSelectedCatId((prev) => (prev === cat.id ? null : cat.id));
-    setSearch("");
-    setTimeout(() => servicesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
-  };
-
-  const handleBookClick = (svc: Service) => {
-    if (!user) { onLoginClick(); return; }
-    setSelectedService(svc);
+    const slug = cat.slug || cat.name.toLowerCase().replace(/\s+/g, "-");
+    navigate(`/category/${encodeURIComponent(slug)}`);
   };
 
   return (
@@ -481,7 +460,7 @@ export default function HomePage({ onLoginClick }: Props) {
               type="text"
               placeholder="Search services…"
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setSelectedCatId(null); }}
+              onChange={(e) => { setSearch(e.target.value); }}
               className="flex-1 bg-transparent text-white text-sm placeholder-gray-500 focus:outline-none"
             />
             {search && (
@@ -565,23 +544,16 @@ export default function HomePage({ onLoginClick }: Props) {
                   </div>
                 ))
               : filteredCategories.map((cat) => {
-                  const active = selectedCatId === cat.id;
                   return (
                     <button
                       key={cat.id}
                       onClick={() => handleCatClick(cat)}
                       className="flex flex-col items-center gap-2 shrink-0 w-[72px] group"
                     >
-                      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300 ${
-                        active
-                          ? "bg-ink shadow-lg scale-110 animate-float"
-                          : "bg-white shadow-sm hover:-translate-y-2 hover:scale-110 hover:shadow-md"
-                      }`}>
-                        {renderCatIcon(cat.slug, 26, active ? "#FFFFFF" : "#0A0A0A")}
+                      <div className="w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300 bg-white shadow-sm hover:-translate-y-2 hover:scale-110 hover:shadow-md">
+                        {renderCatIcon(cat.slug, 26, "#0A0A0A")}
                       </div>
-                      <span className={`text-[11px] font-bold text-center leading-tight tracking-tight transition-colors ${
-                        active ? "text-ink" : "text-[#6B7280] group-hover:text-ink"
-                      }`}>
+                      <span className="text-[11px] font-bold text-center leading-tight tracking-tight transition-colors text-[#6B7280] group-hover:text-ink">
                         {cat.name.charAt(0).toUpperCase() + cat.name.slice(1)}
                       </span>
                     </button>
@@ -693,7 +665,7 @@ export default function HomePage({ onLoginClick }: Props) {
 
           {/* ── Category cards grid (Popular Services) ── */}
           <h2 ref={servicesRef} className="text-[17px] font-extrabold text-ink tracking-tight mt-7 mb-4">
-            {selectedCat ? selectedCat.name.charAt(0).toUpperCase() + selectedCat.name.slice(1) : "Popular Services"}
+            Popular Services
           </h2>
 
           {loading ? (
@@ -708,154 +680,64 @@ export default function HomePage({ onLoginClick }: Props) {
                 </div>
               ))}
             </div>
-          ) : !selectedCat ? (
-            /* ── Category cards ── */
-            filteredCategories.length === 0 ? (
-              <div className="text-center py-16 text-muted">
-                <p className="text-4xl mb-3">🔍</p>
-                <p className="font-semibold text-ink">No results for "{search}"</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                {filteredCategories.map((cat, index) => {
-                  return (
-                    <button
-                      key={cat.id}
-                      onClick={() => handleCatClick(cat)}
-                      className="bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 text-left group"
-                    >
-                      {/* Photo */}
-                      <div className="relative w-full aspect-[16/9] bg-gray-100 overflow-hidden">
-                        {cat.imageUrl ? (
-                          <img
-                            src={cat.imageUrl}
-                            alt={cat.name}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-gray-50">
-                            {renderCatIcon(cat.slug, 64, "#D1D5DB")}
-                          </div>
-                        )}
-                        {/* Gradient overlay */}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent"/>
-                        {/* Popular badge — first 2 */}
-                        {index < 2 && (
-                          <div className="absolute top-2 left-2 bg-primary text-white text-[9px] font-bold px-2 py-0.5 rounded-full tracking-wide uppercase">
-                            Popular
-                          </div>
-                        )}
-                        {/* Service count badge */}
-                        <div className="absolute top-2 right-2 bg-black/40 backdrop-blur-sm text-white text-[9px] font-semibold px-2 py-0.5 rounded-full">
-                          {cat.services.length} service{cat.services.length !== 1 ? "s" : ""}
-                        </div>
-                        {/* Name + price overlay */}
-                        <div className="absolute bottom-2 left-2.5 right-2.5 flex items-end justify-between">
-                          <div>
-                            <p className="text-white font-extrabold text-[13px] tracking-tight leading-tight capitalize drop-shadow-sm">
-                              {cat.name}
-                            </p>
-                            <p className="text-white/70 text-[10px] mt-0.5">
-                              from ₹{cat.minPrice === Infinity ? "—" : cat.minPrice}
-                            </p>
-                          </div>
-                          <div className="w-5 h-5 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center group-hover:bg-white/40 transition-colors">
-                            <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7"/>
-                            </svg>
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )
+          ) : filteredCategories.length === 0 ? (
+            <div className="text-center py-16 text-muted">
+              <p className="text-4xl mb-3">🔍</p>
+              <p className="font-semibold text-ink">No results for "{search}"</p>
+            </div>
           ) : (
-            /* ── Individual services within selected category ── */
-            <>
-              <button
-                onClick={() => setSelectedCatId(null)}
-                className="flex items-center gap-1.5 text-sm text-muted hover:text-ink mb-5 transition"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/>
-                </svg>
-                All Categories
-              </button>
-
-              {catServices.length === 0 ? (
-                <div className="text-center py-12 text-muted">
-                  <p className="text-4xl mb-3">🔍</p>
-                  <p>No services found</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {catServices.map((svc) => {
-                    const img = svc.imageUrl?.trim() || "";
-                    return (
-                      <div key={svc._id} className="bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col group">
-                        {/* Photo */}
-                        <div className="relative w-full aspect-[3/2] bg-gray-50 overflow-hidden shrink-0">
-                          {img ? (
-                            <img
-                              src={img}
-                              alt={svc.name}
-                              className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
-                              onError={(e) => {
-                                const el = e.target as HTMLImageElement;
-                                el.style.display = "none";
-                                el.nextElementSibling?.classList.remove("hidden");
-                              }}
-                            />
-                          ) : null}
-                          {/* Fallback icon — shown when no image or image fails */}
-                          <div className={`absolute inset-0 flex items-center justify-center ${img ? "hidden" : ""}`}>
-                            {renderCatIcon(catSlug(svc.category), 52, "#D1D5DB")}
-                          </div>
-                          {/* Duration chip */}
-                          {svc.duration && (
-                            <div className="absolute top-3 right-3 bg-black/40 backdrop-blur-sm text-white text-[11px] font-semibold px-2.5 py-1 rounded-full">
-                              ⏱ {svc.duration} min
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Content */}
-                        <div className="p-3 flex flex-col flex-1">
-                          {svc.subCategory && typeof svc.subCategory === "object" && (
-                            <span className="text-[9px] font-bold uppercase tracking-widest text-primary mb-1">
-                              {svc.subCategory.name}
-                            </span>
-                          )}
-                          <h3 className="font-bold text-ink text-[13px] tracking-tight leading-snug mb-0.5">{svc.name}</h3>
-                          {svc.description && (
-                            <p className="text-[11px] text-muted line-clamp-2 leading-relaxed flex-1 mb-2">{svc.description}</p>
-                          )}
-                          <div className="flex items-center justify-between pt-2 border-t border-border mt-auto">
-                            <div>
-                              <span className="text-[10px] text-muted">from </span>
-                              <span className="font-extrabold text-ink text-sm">₹{svc.price}</span>
-                            </div>
-                            <button
-                              onClick={() => handleBookClick(svc)}
-                              className="btn-primary text-xs px-3 py-1.5"
-                            >
-                              Book
-                            </button>
-                          </div>
-                        </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {filteredCategories.map((cat, index) => (
+                <button
+                  key={cat.id}
+                  onClick={() => handleCatClick(cat)}
+                  className="bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 text-left group"
+                >
+                  <div className="relative w-full aspect-[16/9] bg-gray-100 overflow-hidden">
+                    {cat.imageUrl ? (
+                      <img
+                        src={cat.imageUrl}
+                        alt={cat.name}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                        {renderCatIcon(cat.slug, 64, "#D1D5DB")}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent"/>
+                    {index < 2 && (
+                      <div className="absolute top-2 left-2 bg-primary text-white text-[9px] font-bold px-2 py-0.5 rounded-full tracking-wide uppercase">
+                        Popular
+                      </div>
+                    )}
+                    <div className="absolute top-2 right-2 bg-black/40 backdrop-blur-sm text-white text-[9px] font-semibold px-2 py-0.5 rounded-full">
+                      {cat.services.length} service{cat.services.length !== 1 ? "s" : ""}
+                    </div>
+                    <div className="absolute bottom-2 left-2.5 right-2.5 flex items-end justify-between">
+                      <div>
+                        <p className="text-white font-extrabold text-[13px] tracking-tight leading-tight capitalize drop-shadow-sm">
+                          {cat.name}
+                        </p>
+                        <p className="text-white/70 text-[10px] mt-0.5">
+                          from ₹{cat.minPrice === Infinity ? "—" : cat.minPrice}
+                        </p>
+                      </div>
+                      <div className="w-5 h-5 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center group-hover:bg-white/40 transition-colors">
+                        <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7"/>
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
           )}
 
           {/* ── How it works ── */}
-          {!selectedCat && !search && (
+          {!search && (
             <div className="mt-12">
               <h2 className="text-[17px] font-extrabold text-ink tracking-tight mb-6">How It Works</h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -875,7 +757,7 @@ export default function HomePage({ onLoginClick }: Props) {
           )}
 
           {/* ── CTA for guests ── */}
-          {!user && !selectedCat && !search && (
+          {!user && !search && (
             <div className="mt-8 bg-ink rounded-3xl p-7 text-center shadow-[0_8px_40px_rgba(0,0,0,0.14)]">
               <p className="text-white font-bold text-lg mb-1">Ready to book?</p>
               <p className="text-white/50 text-sm mb-4">Login with your phone and book in under a minute.</p>
@@ -922,19 +804,6 @@ export default function HomePage({ onLoginClick }: Props) {
         </div>
       )}
 
-      {/* ── Booking modal ── */}
-      {selectedService && (
-        <BookingModal
-          service={selectedService}
-          onClose={() => setSelectedService(null)}
-          onSuccess={(bookingId) => {
-            setSelectedService(null);
-            navigate(`/bookings/${bookingId}`);
-          }}
-        />
-      )}
-
-      {/* ── Success toast ── */}
     </>
   );
 }
