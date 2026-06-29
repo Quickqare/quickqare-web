@@ -24,7 +24,7 @@ type Booking = {
   houseDetails?: string;
   pincode?: string;
   totalAmount: number;
-  partner?: { _id: string; name: string; phone: string; rating?: number } | null;
+  partner?: { _id: string; name: string; phone: string; rating?: number; selfieUrl?: string; selfieVerificationStatus?: string } | null;
   estimateStatus?: "none" | "pending" | "approved" | "rejected";
   estimateItems?: { name: string; price: number; quantity: number }[];
   estimateTotal?: number;
@@ -114,8 +114,9 @@ export default function BookingStatusPage() {
         ...(data.cancelReason ? { cancelReason: data.cancelReason } : {}),
         ...(data.refundAmount != null ? { refundAmount: data.refundAmount } : {}),
       } : prev);
-      // Refetch on CANCELLED so refundAmount / refundStatus / cancelledBy are accurate from DB
-      if (data.status === "CANCELLED") {
+      // Refetch when a partner is assigned to get full partner info (including selfie)
+      // and on CANCELLED to get accurate refund details from DB.
+      if (["CANCELLED", "ASSIGNED", "CONFIRMED", "PARTNER_ACCEPTED"].includes(data.status)) {
         client.get(`/api/booking/${bookingId}`)
           .then((r) => setBooking(r.data?.booking ?? r.data))
           .catch(() => {});
@@ -447,11 +448,29 @@ export default function BookingStatusPage() {
         <div className="card p-5 mb-4">
           <h2 className="font-semibold text-ink text-sm mb-3">Your Service Partner</h2>
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-lg shrink-0">
-              {booking.partner.name?.[0]?.toUpperCase() ?? "P"}
-            </div>
+            {booking.partner.selfieUrl ? (
+              <div className="relative shrink-0">
+                <img
+                  src={booking.partner.selfieUrl}
+                  alt={booking.partner.name}
+                  className="w-14 h-14 rounded-full object-cover border-2 border-border"
+                />
+                {booking.partner.selfieVerificationStatus === "APPROVED" && (
+                  <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center text-white text-xs font-bold border-2 border-white">✓</span>
+                )}
+              </div>
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-lg shrink-0">
+                {booking.partner.name?.[0]?.toUpperCase() ?? "P"}
+              </div>
+            )}
             <div className="flex-1">
-              <p className="font-semibold text-ink">{booking.partner.name}</p>
+              <div className="flex items-center gap-2">
+                <p className="font-semibold text-ink">{booking.partner.name}</p>
+                {booking.partner.selfieVerificationStatus === "APPROVED" && (
+                  <span className="text-xs font-semibold text-green-600 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">Verified</span>
+                )}
+              </div>
               {booking.partner.rating && (
                 <p className="text-xs text-muted">⭐ {booking.partner.rating.toFixed(1)} rating</p>
               )}

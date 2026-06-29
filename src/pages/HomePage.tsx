@@ -9,7 +9,8 @@ import BookingModal, { CartItem } from "../components/BookingModal";
 type CategoryObj = { _id: string; name: string; slug?: string; imageUrl?: string };
 type Service = {
   _id: string; name: string; price: number; description?: string;
-  imageUrl?: string; category?: CategoryObj | string | null;
+  imageUrl?: string; webImageUrl?: string;
+  category?: CategoryObj | string | null;
   subCategory?: { _id: string; name: string } | string | null;
   duration?: number; isActive?: boolean;
 };
@@ -790,7 +791,7 @@ export default function HomePage({ onLoginClick }: Props) {
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {catServices.map((svc) => {
-                    const img = svc.imageUrl?.trim() || "";
+                    const img = (svc.webImageUrl?.trim() || svc.imageUrl?.trim() || "");
                     return (
                       <div key={svc._id} className="bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col group">
                         <div className="relative w-full aspect-[3/2] bg-gray-50 overflow-hidden shrink-0">
