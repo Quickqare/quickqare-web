@@ -1,18 +1,17 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-import client, { setToken } from "../api/client";
+import client from "../api/client";
 import { resendWebOtp, sendWebOtp, verifyWebOtp } from "../services/msg91";
 
 type User = { _id: string; name: string; phone: string; email?: string; gender?: string };
 
 type AuthCtx = {
   user: User | null;
-  token: string | null;
   loading: boolean;
   sendOtp: (phone: string) => Promise<{ success: boolean; message: string }>;
   resendOtp: (phone: string) => Promise<{ success: boolean; message: string }>;
   verifyOtp: (phone: string, otp: string) => Promise<{ success: boolean; message: string; isNewUser?: boolean }>;
   completeProfile: (name: string, gender: string) => Promise<{ success: boolean; message?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 };
 
@@ -21,26 +20,26 @@ export const useAuth = () => useContext(Ctx);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setTokenState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const t = localStorage.getItem("qq_web_token");
-    const u = localStorage.getItem("qq_web_user");
-    if (t) { setTokenState(t); setToken(t); }
-    if (u) { try { setUser(JSON.parse(u)); } catch {} }
-    setLoading(false);
-  }, []);
-
+  // The session lives in an httpOnly cookie the browser sends automatically, so
+  // there is no token in JS. We learn who the user is by asking the API.
   const refreshUser = useCallback(async () => {
     try {
       const res = await client.get("/api/auth/me");
-      if (res.data?.user) {
-        setUser(res.data.user);
-        localStorage.setItem("qq_web_user", JSON.stringify(res.data.user));
-      }
-    } catch {}
+      setUser(res.data?.user ?? null);
+    } catch {
+      // 401 (no/invalid cookie) — treat as logged out.
+      setUser(null);
+    }
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      await refreshUser();
+      setLoading(false);
+    })();
+  }, [refreshUser]);
 
   const sendOtp = async (phone: string) => {
     try {
@@ -64,16 +63,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       // 1) Verify the OTP with the MSG91 widget to obtain a verified access token.
       const accessToken = await verifyWebOtp(otp);
-      // 2) Exchange it server-side for an app JWT (also creates the user if new).
+      // 2) Exchange it server-side for the session — the API replies with the
+      //    user and sets the httpOnly auth cookie (no token reaches JS).
       const res = await client.post("/api/auth/msg91/exchange", { phone, accessToken });
       if (res.data?.success) {
-        const t = res.data.token;
         const u = res.data.user;
-        setTokenState(t);
-        setToken(t);
         setUser(u);
-        localStorage.setItem("qq_web_token", t);
-        localStorage.setItem("qq_web_user", JSON.stringify(u));
         const isNewUser = res.data?.isNewUser === true || u?.name === "User" || !u?.gender;
         return { success: true, message: "", isNewUser };
       }
@@ -88,11 +83,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const res = await client.patch("/api/user/profile", { name, gender });
       if (res.data?.success) {
         const u = res.data.data?.user;
-        if (u) {
-          const mapped = { ...u, _id: u.id ?? u._id };
-          setUser(mapped as User);
-          localStorage.setItem("qq_web_user", JSON.stringify(mapped));
-        }
+        if (u) setUser({ ...u, _id: u.id ?? u._id } as User);
         return { success: true };
       }
       return { success: false, message: res.data?.message };
@@ -101,16 +92,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const logout = () => {
+  const logout = useCallback(async () => {
+    try {
+      await client.post("/api/auth/logout"); // clears the httpOnly cookie server-side
+    } catch {
+      // best-effort — clear local state regardless
+    }
     setUser(null);
-    setTokenState(null);
-    setToken(null);
-    localStorage.removeItem("qq_web_token");
-    localStorage.removeItem("qq_web_user");
-  };
+  }, []);
 
   return (
-    <Ctx.Provider value={{ user, token, loading, sendOtp, resendOtp, verifyOtp, completeProfile, logout, refreshUser }}>
+    <Ctx.Provider value={{ user, loading, sendOtp, resendOtp, verifyOtp, completeProfile, logout, refreshUser }}>
       {children}
     </Ctx.Provider>
   );

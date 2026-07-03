@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import client from "../api/client";
 import { useAppConfig } from "../hooks/useAppConfig";
+import { useAuth } from "../contexts/AuthContext";
 import { getSavedLocation } from "../pages/HomePage";
 import { getCartItemTotal } from "../utils/mehendiPricing";
 
@@ -75,7 +76,8 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
   const serviceIds = cart.map((i) => i.serviceId).filter(Boolean);
   const firstItem = cart[0];
 
-  const isLoggedIn = Boolean(localStorage.getItem("qq_web_token"));
+  const { user } = useAuth();
+  const isLoggedIn = Boolean(user);
 
   // Pre-fill from the location set at homepage prompt. Only prefill address
   // when GPS was used (coords are non-zero) — a pincode-only entry has no
@@ -110,10 +112,17 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
     setSlotsLoading(true);
     setNotServiceable(false);
     try {
+      // Send GPS coords when we have them (coords is [lng, lat]) so H3 hub
+      // matching uses the precise location instead of the pincode centroid.
+      const hasCoords =
+        Array.isArray(coords) &&
+        Number.isFinite(coords[0]) && Number.isFinite(coords[1]) &&
+        (coords[0] !== 0 || coords[1] !== 0);
       const res = await client.post("/api/booking/available-slots", {
         date: forDate,
         services: cart.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })),
         pincode: forPincode,
+        ...(hasCoords ? { latitude: coords[1], longitude: coords[0] } : {}),
       });
       const slots: any[] = Array.isArray(res.data?.slots) ? res.data.slots : [];
       setAvailableSlotTimes(slots.map((s) => String(s?.time || s || "").trim()).filter(Boolean));
@@ -128,7 +137,7 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
       setSlotsLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(cart)]);
+  }, [JSON.stringify(cart), coords]);
 
   // Re-fetch slots when date changes (only if pincode already known)
   useEffect(() => {

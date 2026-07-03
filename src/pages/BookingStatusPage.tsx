@@ -92,9 +92,9 @@ export default function BookingStatusPage() {
   // Socket.io for live updates
   useEffect(() => {
     if (!user?._id || !bookingId) return;
-    const token = localStorage.getItem("qq_web_token");
-
-    const socket = io(SOCKET_URL, { auth: { token }, transports: ["websocket", "polling"] });
+    // The session cookie is httpOnly, so we can't pass a token in the handshake.
+    // withCredentials makes the browser send the cookie; the server reads it.
+    const socket = io(SOCKET_URL, { withCredentials: true, transports: ["websocket", "polling"] });
     socketRef.current = socket;
 
     socket.on("connect", () => {
