@@ -21,7 +21,7 @@ export const getMehendiHandsPrice = (key: string | null, hands: number): number 
   if (key === "bangle")             return [0, 799, 1199, 1699, 2199][q] ?? Math.round(q * 599 * 0.95);
   if (key === "mid")                return [0, 999, 1499, 2099, 2599][q] ?? q * 629;
   if (key === "elbow_bridal")       return [0, 1799, 3000][q] ?? Math.round(q * 1799 * 0.75);
-  if (key === "above_elbow_bridal") return [0, 2000, 3500][q] ?? null;
+  if (key === "above_elbow_bridal") return [0, 2000, 3500][q] ?? Math.round(q * 2000 * 0.75);
   return null;
 };
 
@@ -50,7 +50,11 @@ export const getCartItemTotal = (
   item: { name: string; price: number; quantity: number; pricingKey?: string | null },
   cart: Array<{ name: string; price: number; quantity: number; pricingKey?: string | null }>
 ): number => {
-  const rulePrice = getMehendiHandsPrice(item.pricingKey ?? null, item.quantity);
+  // Prefer an explicit pricingKey; fall back to deriving it from the name so
+  // callers that only pass a service name (e.g. the homepage quick-book flow)
+  // still get correct hand-package pricing.
+  const key = item.pricingKey ?? getMehendiPricingKey(item.name);
+  const rulePrice = getMehendiHandsPrice(key, item.quantity);
   if (rulePrice !== null) return rulePrice;
 
   const n = normalize(item.name);

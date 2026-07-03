@@ -3,7 +3,7 @@ import client from "../api/client";
 import { useAppConfig } from "../hooks/useAppConfig";
 import { useAuth } from "../contexts/AuthContext";
 import { getSavedLocation } from "../pages/HomePage";
-import { getCartItemTotal } from "../utils/mehendiPricing";
+import { getCartItemTotal, getMehendiPricingKey } from "../utils/mehendiPricing";
 
 export type CartItem = {
   cartKey: string;
@@ -35,6 +35,14 @@ const TIME_SLOTS: { value: string; label: string }[] = [
 
 const LABEL_ICONS: Record<string, string> = { Home: "🏠", Work: "💼", Other: "📍" };
 
+// Matches the mobile app's per-service cap for mehendi hands.
+const MAX_MEHENDI_HANDS = 25;
+
+// A cart item is a mehendi hand design (choose 1–25 hands) when it resolves to
+// a hand-pricing key — either explicitly or derived from its name.
+const isMehendiHandsItem = (item: CartItem): boolean =>
+  Boolean(item.pricingKey ?? getMehendiPricingKey(item.name));
+
 function todayISO() {
   return new Date().toISOString().split("T")[0];
 }
@@ -42,6 +50,21 @@ function todayISO() {
 declare const Razorpay: any;
 
 export default function BookingModal({ cart, onClose, onSuccess }: Props) {
+  // Editable working copy so mehendi bookings can adjust the number of hands
+  // inside the modal. Seeded from the incoming cart; the modal is remounted
+  // per booking, so a plain initial value is sufficient.
+  const [items, setItems] = useState<CartItem[]>(cart);
+
+  const updateHands = (cartKey: string, delta: number) => {
+    setItems((prev) =>
+      prev.map((it) =>
+        it.cartKey === cartKey
+          ? { ...it, quantity: Math.min(Math.max(it.quantity + delta, 1), MAX_MEHENDI_HANDS) }
+          : it
+      )
+    );
+  };
+
   const [date, setDate] = useState(todayISO());
   const [time, setTime] = useState("");
   const [address, setAddress] = useState("");
@@ -72,9 +95,9 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
   const [error, setError] = useState("");
   const [step, setStep] = useState<"form" | "paying">("form");
 
-  const basePrice = cart.reduce((sum, item) => sum + getCartItemTotal(item, cart), 0);
-  const serviceIds = cart.map((i) => i.serviceId).filter(Boolean);
-  const firstItem = cart[0];
+  const basePrice = items.reduce((sum, item) => sum + getCartItemTotal(item, items), 0);
+  const serviceIds = items.map((i) => i.serviceId).filter(Boolean);
+  const firstItem = items[0];
 
   const { user } = useAuth();
   const isLoggedIn = Boolean(user);
@@ -114,7 +137,7 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
     try {
       const res = await client.post("/api/booking/available-slots", {
         date: forDate,
-        services: cart.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })),
+        services: items.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })),
         pincode: forPincode,
       });
       const slots: any[] = Array.isArray(res.data?.slots) ? res.data.slots : [];
@@ -130,7 +153,7 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
       setSlotsLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(cart)]);
+  }, [JSON.stringify(items)]);
 
   // Re-fetch slots when date changes (only if pincode already known)
   useEffect(() => {
@@ -282,7 +305,7 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
 
     try {
       const bookingRes = await client.post("/api/booking/create", {
-        services: cart.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })),
+        services: items.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })),
         scheduledDate: date,
         scheduledTime: time,
         address: address.trim(),
@@ -375,9 +398,9 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
           <div>
             <h2 className="text-lg font-bold text-ink">Book Service</h2>
             <p className="text-sm text-muted mt-0.5">
-              {cart.length === 1
+              {items.length === 1
                 ? firstItem?.name
-                : `${cart.length} services · ₹${basePrice.toLocaleString("en-IN")}`}
+                : `${items.length} services · ₹${basePrice.toLocaleString("en-IN")}`}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-ink text-2xl leading-none ml-4">×</button>
@@ -391,13 +414,65 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
         ) : (
           <div className="space-y-4">
 
+            {/* Number of hands — mehendi hand designs are priced per hand */}
+            {items.filter(isMehendiHandsItem).map((item) => {
+              const lineTotal = getCartItemTotal(item, items);
+              const originalTotal = item.price * Math.max(item.quantity, 1);
+              const discountPercent =
+                originalTotal > lineTotal
+                  ? Math.round(((originalTotal - lineTotal) / originalTotal) * 100)
+                  : 0;
+              return (
+                <div key={item.cartKey} className="border border-border rounded-xl p-3.5 bg-gray-50">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-bold text-ink text-sm leading-snug">{item.name}</p>
+                      <p className="text-xs text-muted mt-0.5">
+                        {item.quantity} hand{item.quantity > 1 ? "s" : ""} · ₹{lineTotal.toLocaleString("en-IN")}
+                        {discountPercent > 0 && (
+                          <span className="ml-1.5 text-green-600 font-semibold">{discountPercent}% off</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center border border-primary rounded-xl overflow-hidden shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => updateHands(item.cartKey, -1)}
+                        disabled={item.quantity <= 1}
+                        className="w-9 h-9 flex items-center justify-center text-primary font-bold text-lg hover:bg-primary/10 transition disabled:opacity-30 disabled:hover:bg-transparent"
+                      >
+                        −
+                      </button>
+                      <span className="min-w-[2.25rem] text-center text-sm font-bold text-ink">{item.quantity}</span>
+                      <button
+                        type="button"
+                        onClick={() => updateHands(item.cartKey, +1)}
+                        disabled={item.quantity >= MAX_MEHENDI_HANDS}
+                        className="w-9 h-9 flex items-center justify-center text-primary font-bold text-lg hover:bg-primary/10 transition disabled:opacity-30 disabled:hover:bg-transparent"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted mt-2">Choose how many hands you'd like designed.</p>
+                </div>
+              );
+            })}
+
             {/* Cart summary (when multiple items) */}
-            {cart.length > 1 && (
+            {items.length > 1 && (
               <div className="bg-gray-50 rounded-xl p-3 space-y-1">
-                {cart.map((item) => (
+                {items.map((item) => (
                   <div key={item.cartKey} className="flex items-center justify-between text-sm">
-                    <span className="text-ink">{item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ""}</span>
-                    <span className="font-semibold text-ink">₹{getCartItemTotal(item, cart).toLocaleString("en-IN")}</span>
+                    <span className="text-ink">
+                      {item.name}
+                      {isMehendiHandsItem(item)
+                        ? ` · ${item.quantity} hand${item.quantity > 1 ? "s" : ""}`
+                        : item.quantity > 1
+                        ? ` ×${item.quantity}`
+                        : ""}
+                    </span>
+                    <span className="font-semibold text-ink">₹{getCartItemTotal(item, items).toLocaleString("en-IN")}</span>
                   </div>
                 ))}
               </div>

@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import client from "../api/client";
 import { useAppConfig } from "../hooks/useAppConfig";
 import BookingModal, { CartItem } from "../components/BookingModal";
+import { getMehendiPricingKey } from "../utils/mehendiPricing";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type CategoryObj = { _id: string; name: string; slug?: string; imageUrl?: string };
@@ -115,6 +116,28 @@ function catId(raw: Service["category"]): string {
   if (!raw || typeof raw === "string") return String(raw ?? "");
   return raw._id ?? "";
 }
+
+function subCatName(raw: Service["subCategory"]): string {
+  if (!raw) return "";
+  if (typeof raw === "string") return raw;
+  return raw.name ?? "";
+}
+
+// Services under a "<base> options" subcategory (e.g. "AC installation options")
+// are variants of a base service and are shown nested inside a picker, matching
+// the app — not as their own flat cards.
+const OPTIONS_SUFFIX = " options";
+const isVariantService = (svc: Service): boolean =>
+  subCatName(svc.subCategory).trim().toLowerCase().endsWith(OPTIONS_SUFFIX);
+
+// Short label for a variant inside its base's picker: "Split AC installation"
+// under base "AC installation" → "Split AC". Repair issues keep their own name.
+const variantShortLabel = (variantName: string, baseName: string): string => {
+  const lastWord = (baseName.trim().split(/\s+/).pop() || "").toLowerCase();
+  if (!lastWord) return variantName;
+  const short = variantName.replace(new RegExp(`\\s*${lastWord}\\s*$`, "i"), "").trim();
+  return short || variantName;
+};
 
 const STEPS = [
   { n: "1", title: "Choose a Service", desc: "Browse categories and pick what you need." },
@@ -322,6 +345,9 @@ export default function HomePage({ onLoginClick }: Props) {
   const [search, setSearch] = useState("");
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [bookingCart, setBookingCart] = useState<CartItem[] | null>(null);
+  // When a base service (e.g. "AC installation") has variants, we show a picker
+  // to choose the type/issue before booking — same as the app's nested flow.
+  const [acPicker, setAcPicker] = useState<{ base: Service; variants: Service[] } | null>(null);
   const [offers, setOffers] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
   const [bannerIndex, setBannerIndex] = useState(0);
@@ -426,7 +452,10 @@ export default function HomePage({ onLoginClick }: Props) {
               s.name.toLowerCase().includes(q) ||
               (s.description ?? "").toLowerCase().includes(q)
           )
-        : selectedCat.services)
+        // Hide variant sub-services (Split/Window AC, repair issues) — they're
+        // surfaced nested inside their base service's picker. Kept visible while
+        // searching so they remain findable by name.
+        : selectedCat.services.filter((s) => !isVariantService(s)))
     : [];
 
   const handleCatClick = (cat: GroupedCategory) => {
@@ -435,15 +464,41 @@ export default function HomePage({ onLoginClick }: Props) {
     setTimeout(() => servicesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
   };
 
-  const handleBookClick = (svc: Service) => {
+  // Variants of a base service = catalog services under its "<name> options"
+  // subcategory (e.g. "AC installation" → "Split AC installation", "Window AC
+  // installation"). Sorted cheapest-first for a sensible picker order.
+  const getVariantsFor = (svc: Service): Service[] => {
+    const target = `${svc.name.trim().toLowerCase()}${OPTIONS_SUFFIX}`;
+    return services
+      .filter((s) => subCatName(s.subCategory).trim().toLowerCase() === target)
+      .sort((a, b) => a.price - b.price);
+  };
+
+  const proceedToBook = (svc: Service) => {
     if (!user) { onLoginClick(); return; }
+    setAcPicker(null);
     setBookingCart([{
       cartKey: svc._id,
       serviceId: svc._id,
       name: svc.name,
       price: svc.price,
       quantity: 1,
+      // Mehendi hand designs get tiered per-hand pricing; carrying the key lets
+      // the booking modal show a "number of hands" stepper with live pricing.
+      pricingKey: getMehendiPricingKey(svc.name),
+      category: catName(svc.category),
     }]);
+  };
+
+  const handleBookClick = (svc: Service) => {
+    const variants = getVariantsFor(svc);
+    if (variants.length > 0) {
+      // Let the user choose a type/issue first (matches the app). Login is
+      // gated at the point they pick and proceed to the booking modal.
+      setAcPicker({ base: svc, variants });
+      return;
+    }
+    proceedToBook(svc);
   };
 
   return (
@@ -792,6 +847,8 @@ export default function HomePage({ onLoginClick }: Props) {
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {catServices.map((svc) => {
                     const img = (svc.webImageUrl?.trim() || svc.imageUrl?.trim() || "");
+                    const variants = getVariantsFor(svc);
+                    const fromPrice = variants.length ? variants[0].price : svc.price;
                     return (
                       <div key={svc._id} className="bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col group">
                         <div className="relative w-full aspect-[3/2] bg-gray-50 overflow-hidden shrink-0">
@@ -829,13 +886,18 @@ export default function HomePage({ onLoginClick }: Props) {
                           <div className="flex items-center justify-between pt-2 border-t border-border mt-auto">
                             <div>
                               <span className="text-[10px] text-muted">from </span>
-                              <span className="font-extrabold text-ink text-sm">₹{svc.price}</span>
+                              <span className="font-extrabold text-ink text-sm">₹{fromPrice}</span>
+                              {variants.length > 0 && (
+                                <span className="block text-[9px] text-primary font-semibold">
+                                  {variants.length} option{variants.length > 1 ? "s" : ""}
+                                </span>
+                              )}
                             </div>
                             <button
                               onClick={() => handleBookClick(svc)}
                               className="btn-primary text-xs px-3 py-1.5"
                             >
-                              Book
+                              {variants.length > 0 ? "Choose" : "Book"}
                             </button>
                           </div>
                         </div>
@@ -891,6 +953,63 @@ export default function HomePage({ onLoginClick }: Props) {
           </div>
         </div>
       </div>
+
+      {/* ── AC option picker (Split/Window, repair issue) ── */}
+      {acPicker && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+          onClick={() => setAcPicker(null)}
+        >
+          <div
+            className="bg-white rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border sticky top-0 bg-white z-10">
+              <div>
+                <h3 className="font-bold text-ink text-sm">{acPicker.base.name}</h3>
+                <p className="text-xs text-muted mt-0.5">
+                  {acPicker.base.name.toLowerCase().includes("repair")
+                    ? "Choose the issue you're facing"
+                    : "Choose a type"}
+                </p>
+              </div>
+              <button
+                onClick={() => setAcPicker(null)}
+                className="text-gray-400 hover:text-ink text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              {acPicker.variants.map((v) => (
+                <div
+                  key={v._id}
+                  className="flex items-start justify-between gap-4 border border-border rounded-xl p-3.5 hover:border-primary transition"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-ink text-sm">
+                      {variantShortLabel(v.name, acPicker.base.name)}
+                    </p>
+                    {v.description && (
+                      <p className="text-xs text-muted mt-0.5 line-clamp-2">{v.description}</p>
+                    )}
+                    <p className="text-xs font-bold text-ink mt-1">
+                      ₹{v.price}
+                      {v.duration && <span className="text-muted font-normal"> · {v.duration} min</span>}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => proceedToBook(v)}
+                    className="shrink-0 self-center text-xs font-bold text-primary border border-primary rounded-lg px-4 py-2 hover:bg-primary hover:text-white transition"
+                  >
+                    Book
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Booking modal ── */}
       {bookingCart && (
