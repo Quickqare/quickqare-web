@@ -112,17 +112,10 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
     setSlotsLoading(true);
     setNotServiceable(false);
     try {
-      // Send GPS coords when we have them (coords is [lng, lat]) so H3 hub
-      // matching uses the precise location instead of the pincode centroid.
-      const hasCoords =
-        Array.isArray(coords) &&
-        Number.isFinite(coords[0]) && Number.isFinite(coords[1]) &&
-        (coords[0] !== 0 || coords[1] !== 0);
       const res = await client.post("/api/booking/available-slots", {
         date: forDate,
         services: cart.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })),
         pincode: forPincode,
-        ...(hasCoords ? { latitude: coords[1], longitude: coords[0] } : {}),
       });
       const slots: any[] = Array.isArray(res.data?.slots) ? res.data.slots : [];
       setAvailableSlotTimes(slots.map((s) => String(s?.time || s || "").trim()).filter(Boolean));
@@ -137,7 +130,7 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
       setSlotsLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(cart), coords]);
+  }, [JSON.stringify(cart)]);
 
   // Re-fetch slots when date changes (only if pincode already known)
   useEffect(() => {

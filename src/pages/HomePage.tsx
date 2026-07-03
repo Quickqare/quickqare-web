@@ -429,25 +429,14 @@ export default function HomePage({ onLoginClick }: Props) {
         : selectedCat.services)
     : [];
 
-  // Category → ServiceDetailPage (like the app's ServiceDetailsScreen). That
-  // page carries the option selectors — mehendi hands count, AC installation /
-  // uninstallation type (Split / Window), repair issue — which a direct
-  // service→modal shortcut would bypass.
-  const toUrlSlug = (s: string) => s.trim().toLowerCase().replace(/\s+/g, "-");
-
   const handleCatClick = (cat: GroupedCategory) => {
-    navigate(`/category/${encodeURIComponent(toUrlSlug(cat.slug || cat.name))}`);
+    setSelectedCatId((prev) => (prev === cat.id ? null : cat.id));
+    setSearch("");
+    setTimeout(() => servicesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
   };
 
   const handleBookClick = (svc: Service) => {
     if (!user) { onLoginClick(); return; }
-    const slug = catSlug(svc.category);
-    if (slug) {
-      // Route through the category detail page so option selection isn't skipped.
-      navigate(`/category/${encodeURIComponent(toUrlSlug(slug))}`);
-      return;
-    }
-    // Uncategorized service — no options exist for it; book directly.
     setBookingCart([{
       cartKey: svc._id,
       serviceId: svc._id,
