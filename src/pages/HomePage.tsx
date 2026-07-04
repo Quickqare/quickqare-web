@@ -406,26 +406,21 @@ export default function HomePage({ onLoginClick }: Props) {
       )
     : [];
 
-  // "Highlights" — a small set of individual services with real photos,
-  // interleaved round-robin across categories so it's not all one category.
-  // Capped at 4. Skipped while searching since serviceResults covers that case.
+  // "Highlights" — services the admin has flagged as highlighted (isHighlighted)
+  // in the admin panel, ordered by highlightOrder then price. Capped at 4.
+  // Skipped while searching since serviceResults covers that case.
   const HIGHLIGHTS_MAX = 4;
   const topServices: { svc: Service; cat: GroupedCategory }[] = search
     ? []
-    : (() => {
-        const perCat = categories.map((cat) =>
-          [...cat.services]
-            .filter((s) => !isVariantService(s) && (s.webImageUrl?.trim() || s.imageUrl?.trim()))
-            .sort((a, b) => a.price - b.price)
-        );
-        const merged: { svc: Service; cat: GroupedCategory }[] = [];
-        for (let i = 0; merged.length < HIGHLIGHTS_MAX && perCat.some((arr) => arr.length > i); i++) {
-          categories.forEach((cat, ci) => {
-            if (perCat[ci][i]) merged.push({ svc: perCat[ci][i], cat });
-          });
-        }
-        return merged.slice(0, HIGHLIGHTS_MAX);
-      })();
+    : categories
+        .flatMap((cat) => cat.services.map((svc) => ({ svc, cat })))
+        .filter(({ svc }) => svc.isHighlighted && !isVariantService(svc))
+        .sort(
+          (a, b) =>
+            (a.svc.highlightOrder ?? 0) - (b.svc.highlightOrder ?? 0) ||
+            a.svc.price - b.svc.price
+        )
+        .slice(0, HIGHLIGHTS_MAX);
 
   // Each category opens its own page.
   const openCategory = (cat: GroupedCategory) => navigate(`/category/${toUrlSlug(cat)}`);

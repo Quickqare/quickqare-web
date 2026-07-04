@@ -10,6 +10,7 @@ export type Service = {
   category?: CategoryObj | string | null;
   subCategory?: { _id: string; name: string } | string | null;
   duration?: number; isActive?: boolean;
+  isHighlighted?: boolean; highlightOrder?: number;
 };
 
 export type GroupedCategory = {
