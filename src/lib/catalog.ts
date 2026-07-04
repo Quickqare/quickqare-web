@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import client from "../api/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-export type CategoryObj = { _id: string; name: string; slug?: string; imageUrl?: string };
+export type CategoryObj = { _id: string; name: string; slug?: string; imageUrl?: string; webImageUrl?: string };
 
 export type Service = {
   _id: string; name: string; price: number; description?: string;
@@ -30,7 +30,7 @@ export function catSlug(raw: Service["category"]): string {
 }
 export function catImage(raw: Service["category"]): string {
   if (!raw || typeof raw === "string") return "";
-  return raw.imageUrl ?? "";
+  return raw.webImageUrl?.trim() || raw.imageUrl || "";
 }
 export function catId(raw: Service["category"]): string {
   if (!raw || typeof raw === "string") return String(raw ?? "");

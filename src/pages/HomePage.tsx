@@ -406,10 +406,10 @@ export default function HomePage({ onLoginClick }: Props) {
       )
     : [];
 
-  // Individual services with real photos, interleaved round-robin across
-  // categories — a dense catalog-style row (like a real storefront) instead of
-  // the page relying solely on the handful of category cards below. Skipped
-  // while searching since serviceResults already covers that case.
+  // "Highlights" — a small set of individual services with real photos,
+  // interleaved round-robin across categories so it's not all one category.
+  // Capped at 4. Skipped while searching since serviceResults covers that case.
+  const HIGHLIGHTS_MAX = 4;
   const topServices: { svc: Service; cat: GroupedCategory }[] = search
     ? []
     : (() => {
@@ -419,12 +419,12 @@ export default function HomePage({ onLoginClick }: Props) {
             .sort((a, b) => a.price - b.price)
         );
         const merged: { svc: Service; cat: GroupedCategory }[] = [];
-        for (let i = 0; merged.length < 12 && perCat.some((arr) => arr.length > i); i++) {
+        for (let i = 0; merged.length < HIGHLIGHTS_MAX && perCat.some((arr) => arr.length > i); i++) {
           categories.forEach((cat, ci) => {
             if (perCat[ci][i]) merged.push({ svc: perCat[ci][i], cat });
           });
         }
-        return merged.slice(0, 12);
+        return merged.slice(0, HIGHLIGHTS_MAX);
       })();
 
   // Each category opens its own page.
@@ -509,6 +509,121 @@ export default function HomePage({ onLoginClick }: Props) {
             </div>
           )}
 
+          {/* ── Banner (top of page): admin carousel, else default promo ── */}
+          {/* Banner carousel — admin-managed ads/offers, auto-rotating */}
+          {banners.length > 0 && !search && (
+            <div className="relative w-full lg:w-[calc(100%+2rem)] lg:-mx-4 xl:w-[calc(100%+5rem)] xl:-mx-10 rounded-2xl overflow-hidden mb-6" style={{ aspectRatio: "3/1" }}>
+              {banners.map((b, i) => {
+                const inner = (
+                  <>
+                    <img src={b.imageUrl} alt={b.title || ""} className="w-full h-full object-cover" />
+                    {b.title && (
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-4">
+                        <p className="text-white font-bold text-base">{b.title}</p>
+                      </div>
+                    )}
+                  </>
+                );
+                return (
+                  <div
+                    key={b._id}
+                    className={`absolute inset-0 transition-opacity duration-700 ${i === bannerIndex ? "opacity-100" : "opacity-0"}`}
+                  >
+                    {b.linkUrl ? (
+                      <a href={b.linkUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                        {inner}
+                      </a>
+                    ) : inner}
+                  </div>
+                );
+              })}
+              {banners.length > 1 && (
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
+                  {banners.map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setBannerIndex(i)}
+                      className={`w-1.5 h-1.5 rounded-full transition-all ${i === bannerIndex ? "bg-white w-4" : "bg-white/50"}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Default promo banner — shown when no admin banner is active. Admin
+              can disable it from Settings. Gradients + line-art motifs, no image. */}
+          {showDefaultBanner && !search && (
+            <div className="relative w-full lg:w-[calc(100%+2rem)] lg:-mx-4 xl:w-[calc(100%+5rem)] xl:-mx-10 rounded-2xl overflow-hidden mb-6 h-[180px] sm:h-[210px] isolate">
+              {DEFAULT_BANNER_SLIDES.map((s, i) => {
+                const on = i === (bannerIndex % DEFAULT_BANNER_SLIDES.length);
+                return (
+                  <div
+                    key={i}
+                    className={`absolute inset-0 flex items-center transition-opacity duration-700 ${on ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+                    style={{ background: s.gradient }}
+                  >
+                    {/* soft off-axis glow */}
+                    <div className="absolute z-[1] w-[60%] h-[150%] right-[-8%] top-[-30%] pointer-events-none" style={{ background: s.glow }} />
+                    {/* fine grain */}
+                    <div className="absolute inset-0 z-[2] opacity-[0.07] mix-blend-overlay pointer-events-none" style={{ backgroundImage: BANNER_GRAIN }} />
+                    <BannerMotif kind={s.motif} />
+
+                    <div
+                      key={on ? `on-${bannerIndex}` : `off-${i}`}
+                      className={`relative z-[3] px-5 sm:px-9 max-w-[80%] ${on ? "qq-banner-rise" : ""}`}
+                    >
+                      <span
+                        className="inline-block text-[9px] sm:text-[10px] font-extrabold tracking-[0.16em] text-white uppercase bg-white/[0.18] border border-white/25 px-2.5 py-1 rounded-full mb-3"
+                        style={{ animationDelay: "0.04s" }}
+                      >
+                        {s.badge}
+                      </span>
+                      <h3
+                        className="text-white font-extrabold text-xl sm:text-[32px] leading-[1.03] tracking-[-0.035em] text-balance"
+                        style={{ animationDelay: "0.10s", textShadow: "0 2px 20px rgba(0,0,0,.18)" }}
+                      >
+                        {s.title}
+                      </h3>
+                      <p
+                        className="text-white/90 text-[11.5px] sm:text-sm mt-1.5 leading-snug max-w-[42ch] line-clamp-2"
+                        style={{ animationDelay: "0.16s" }}
+                      >
+                        {s.subtitle}
+                      </p>
+                      <button
+                        onClick={() => servicesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                        className="group mt-3.5 inline-flex items-center gap-1.5 bg-white text-ink text-[11.5px] sm:text-[13px] font-extrabold px-4 py-2 rounded-full shadow-[0_8px_20px_-8px_rgba(0,0,0,0.4)] hover:bg-white/95 transition"
+                        style={{ animationDelay: "0.22s" }}
+                      >
+                        {s.cta}
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="transition-transform group-hover:translate-x-0.5">
+                          <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* progress bar (keyed to restart the fill each slide) */}
+              <div className="absolute left-0 bottom-0 z-[4] h-[3px] w-full bg-white/20">
+                <div key={bannerIndex} className="h-full bg-white/85 qq-banner-fill" />
+              </div>
+              {/* dots */}
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[4] flex gap-1.5">
+                {DEFAULT_BANNER_SLIDES.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setBannerIndex(i)}
+                    aria-label={`Show slide ${i + 1}`}
+                    className={`h-[7px] rounded-full transition-all ${i === (bannerIndex % DEFAULT_BANNER_SLIDES.length) ? "w-5 bg-white" : "w-[7px] bg-white/50"}`}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Category icon quick-row */}
           <h2 className="text-[17px] font-extrabold text-ink tracking-tight mb-4">What do you need?</h2>
           <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
@@ -550,50 +665,6 @@ export default function HomePage({ onLoginClick }: Props) {
                   <span className="text-[11px] font-semibold text-ink whitespace-nowrap">{t.label}</span>
                 </div>
               ))}
-            </div>
-          )}
-
-          {/* ── Top Services — individual service photos, catalog-dense ── */}
-          {topServices.length > 0 && (
-            <div className="mt-6">
-              <h2 className="text-[17px] font-extrabold text-ink tracking-tight mb-3">Top Services</h2>
-              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
-                {topServices.map(({ svc, cat }) => {
-                  const img = svc.webImageUrl?.trim() || svc.imageUrl?.trim() || "";
-                  return (
-                    <button
-                      key={svc._id}
-                      onClick={() => openService(svc, cat)}
-                      className="shrink-0 w-[152px] sm:w-[172px] bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 text-left group"
-                    >
-                      <div className="relative w-full aspect-[4/3] bg-gray-100 overflow-hidden">
-                        {img ? (
-                          <img
-                            src={img}
-                            alt={svc.name}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-gray-50">
-                            <CategoryIcon slug={cat.slug} size={40} color="#D1D5DB" />
-                          </div>
-                        )}
-                        <span className="absolute top-2 left-2 bg-black/50 backdrop-blur-sm text-white text-[9px] font-bold px-2 py-0.5 rounded-full capitalize">
-                          {cat.name}
-                        </span>
-                      </div>
-                      <div className="p-2.5">
-                        <p className="font-bold text-ink text-[12px] tracking-tight leading-snug line-clamp-2 mb-1 min-h-[2.4em]">
-                          {svc.name}
-                        </p>
-                        <p className="text-[10px] text-muted -mb-0.5">from</p>
-                        <p className="font-extrabold text-ink text-sm">₹{svc.price}</p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
             </div>
           )}
 
@@ -677,120 +748,6 @@ export default function HomePage({ onLoginClick }: Props) {
                     </div>
                   );
                 })}
-              </div>
-            </div>
-          )}
-
-          {/* Banner carousel — admin-managed ads/offers, auto-rotating */}
-          {banners.length > 0 && !search && (
-            <div className="relative w-full lg:w-[calc(100%+2rem)] lg:-mx-4 xl:w-[calc(100%+5rem)] xl:-mx-10 rounded-2xl overflow-hidden mt-6 mb-2" style={{ aspectRatio: "3/1" }}>
-              {banners.map((b, i) => {
-                const inner = (
-                  <>
-                    <img src={b.imageUrl} alt={b.title || ""} className="w-full h-full object-cover" />
-                    {b.title && (
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-4">
-                        <p className="text-white font-bold text-base">{b.title}</p>
-                      </div>
-                    )}
-                  </>
-                );
-                return (
-                  <div
-                    key={b._id}
-                    className={`absolute inset-0 transition-opacity duration-700 ${i === bannerIndex ? "opacity-100" : "opacity-0"}`}
-                  >
-                    {b.linkUrl ? (
-                      <a href={b.linkUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
-                        {inner}
-                      </a>
-                    ) : inner}
-                  </div>
-                );
-              })}
-              {banners.length > 1 && (
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
-                  {banners.map((_, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setBannerIndex(i)}
-                      className={`w-1.5 h-1.5 rounded-full transition-all ${i === bannerIndex ? "bg-white w-4" : "bg-white/50"}`}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Default promo banner — shown when no admin banner is active. Admin
-              can disable it from Settings. Gradients + line-art motifs, no image. */}
-          {showDefaultBanner && !search && (
-            <div className="relative w-full lg:w-[calc(100%+2rem)] lg:-mx-4 xl:w-[calc(100%+5rem)] xl:-mx-10 rounded-2xl overflow-hidden mt-6 mb-2 h-[180px] sm:h-[210px] isolate">
-              {DEFAULT_BANNER_SLIDES.map((s, i) => {
-                const on = i === (bannerIndex % DEFAULT_BANNER_SLIDES.length);
-                return (
-                  <div
-                    key={i}
-                    className={`absolute inset-0 flex items-center transition-opacity duration-700 ${on ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-                    style={{ background: s.gradient }}
-                  >
-                    {/* soft off-axis glow */}
-                    <div className="absolute z-[1] w-[60%] h-[150%] right-[-8%] top-[-30%] pointer-events-none" style={{ background: s.glow }} />
-                    {/* fine grain */}
-                    <div className="absolute inset-0 z-[2] opacity-[0.07] mix-blend-overlay pointer-events-none" style={{ backgroundImage: BANNER_GRAIN }} />
-                    <BannerMotif kind={s.motif} />
-
-                    <div
-                      key={on ? `on-${bannerIndex}` : `off-${i}`}
-                      className={`relative z-[3] px-5 sm:px-9 max-w-[80%] ${on ? "qq-banner-rise" : ""}`}
-                    >
-                      <span
-                        className="inline-block text-[9px] sm:text-[10px] font-extrabold tracking-[0.16em] text-white uppercase bg-white/[0.18] border border-white/25 px-2.5 py-1 rounded-full mb-3"
-                        style={{ animationDelay: "0.04s" }}
-                      >
-                        {s.badge}
-                      </span>
-                      <h3
-                        className="text-white font-extrabold text-xl sm:text-[32px] leading-[1.03] tracking-[-0.035em] text-balance"
-                        style={{ animationDelay: "0.10s", textShadow: "0 2px 20px rgba(0,0,0,.18)" }}
-                      >
-                        {s.title}
-                      </h3>
-                      <p
-                        className="text-white/90 text-[11.5px] sm:text-sm mt-1.5 leading-snug max-w-[42ch] line-clamp-2"
-                        style={{ animationDelay: "0.16s" }}
-                      >
-                        {s.subtitle}
-                      </p>
-                      <button
-                        onClick={() => servicesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                        className="group mt-3.5 inline-flex items-center gap-1.5 bg-white text-ink text-[11.5px] sm:text-[13px] font-extrabold px-4 py-2 rounded-full shadow-[0_8px_20px_-8px_rgba(0,0,0,0.4)] hover:bg-white/95 transition"
-                        style={{ animationDelay: "0.22s" }}
-                      >
-                        {s.cta}
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="transition-transform group-hover:translate-x-0.5">
-                          <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {/* progress bar (keyed to restart the fill each slide) */}
-              <div className="absolute left-0 bottom-0 z-[4] h-[3px] w-full bg-white/20">
-                <div key={bannerIndex} className="h-full bg-white/85 qq-banner-fill" />
-              </div>
-              {/* dots */}
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[4] flex gap-1.5">
-                {DEFAULT_BANNER_SLIDES.map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setBannerIndex(i)}
-                    aria-label={`Show slide ${i + 1}`}
-                    className={`h-[7px] rounded-full transition-all ${i === (bannerIndex % DEFAULT_BANNER_SLIDES.length) ? "w-5 bg-white" : "w-[7px] bg-white/50"}`}
-                  />
-                ))}
               </div>
             </div>
           )}
@@ -915,6 +872,50 @@ export default function HomePage({ onLoginClick }: Props) {
               </>
             )}
             </>
+          )}
+
+          {/* ── Highlights — up to 4 individual services (was "Top Services") ── */}
+          {!search && topServices.length > 0 && (
+            <div className="mt-10">
+              <h2 className="text-[17px] font-extrabold text-ink tracking-tight mb-4">Highlights</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {topServices.map(({ svc, cat }) => {
+                  const img = svc.webImageUrl?.trim() || svc.imageUrl?.trim() || "";
+                  return (
+                    <button
+                      key={svc._id}
+                      onClick={() => openService(svc, cat)}
+                      className="bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 text-left group"
+                    >
+                      <div className="relative w-full aspect-[4/3] bg-gray-100 overflow-hidden">
+                        {img ? (
+                          <img
+                            src={img}
+                            alt={svc.name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                            <CategoryIcon slug={cat.slug} size={40} color="#D1D5DB" />
+                          </div>
+                        )}
+                        <span className="absolute top-2 left-2 bg-black/50 backdrop-blur-sm text-white text-[9px] font-bold px-2 py-0.5 rounded-full capitalize">
+                          {cat.name}
+                        </span>
+                      </div>
+                      <div className="p-2.5">
+                        <p className="font-bold text-ink text-[12px] tracking-tight leading-snug line-clamp-2 mb-1 min-h-[2.4em]">
+                          {svc.name}
+                        </p>
+                        <p className="text-[10px] text-muted -mb-0.5">from</p>
+                        <p className="font-extrabold text-ink text-sm">₹{svc.price}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           )}
 
           {/* ── How it works ── */}
