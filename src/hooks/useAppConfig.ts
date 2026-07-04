@@ -29,6 +29,7 @@ export type AppConfig = {
   pricing: { taxPercent: number; platformFeePercent: number; platformFeeFlatInr: number };
   homeTheme: HomeTheme;
   socialLinks: SocialLinks;
+  defaultBannerEnabled: boolean;
 };
 
 const DEFAULT_THEME: HomeTheme = {
@@ -59,6 +60,7 @@ const DEFAULT: AppConfig = {
   pricing: { taxPercent: 18, platformFeePercent: 0, platformFeeFlatInr: 0 },
   homeTheme: DEFAULT_THEME,
   socialLinks: DEFAULT_SOCIAL_LINKS,
+  defaultBannerEnabled: true,
 };
 
 function hexToRgbVars(hex: string): string {
@@ -117,6 +119,7 @@ export function useAppConfig() {
         pricing:   res.data?.pricing   ?? DEFAULT.pricing,
         homeTheme: { ...DEFAULT_THEME, ...(res.data?.homeTheme ?? {}) },
         socialLinks: { ...DEFAULT_SOCIAL_LINKS, ...(res.data?.socialLinks ?? {}) },
+        defaultBannerEnabled: res.data?.defaultBannerEnabled !== false,
       };
       cached = c;
       setConfig(c);

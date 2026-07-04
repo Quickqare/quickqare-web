@@ -34,6 +34,16 @@
 .animate-float    { animation: float    2.8s ease-in-out infinite; }
 .animate-icon-bob { animation: icon-bob 0.55s ease-out; }
 
+/* Default promo banner — progress bar fill + staggered content rise */
+@keyframes qq-banner-fill { from { width: 0; } to { width: 100%; } }
+@keyframes qq-banner-rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+.qq-banner-fill   { animation: qq-banner-fill 5s linear forwards; }
+.qq-banner-rise > * { animation: qq-banner-rise 0.6s cubic-bezier(.2,.7,.2,1) backwards; }
+@media (prefers-reduced-motion: reduce) {
+  .qq-banner-fill   { animation: none; width: 100%; }
+  .qq-banner-rise > * { animation: none; }
+}
+
 @layer utilities {
   .scrollbar-none::-webkit-scrollbar { display: none; }
   .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }

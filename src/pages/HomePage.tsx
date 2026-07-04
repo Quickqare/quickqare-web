@@ -118,6 +118,78 @@ const SOCIAL_ICON_MAP: Record<
   youtube:   { Icon: YouTubeIcon,   label: "YouTube" },
 };
 
+// ─── Built-in default promo slides ───────────────────────────────────────────
+// Shown in the home banner slot when no admin banner is active (and the admin
+// hasn't disabled it). Pure CSS gradients + line-art motifs — no image needed.
+type BannerMotifKind = "home" | "shield" | "paisley";
+const DEFAULT_BANNER_SLIDES: {
+  badge: string; title: string; subtitle: string; cta: string;
+  gradient: string; glow: string; motif: BannerMotifKind;
+}[] = [
+  {
+    badge: "QuickQare",
+    title: "Home services, sorted.",
+    subtitle: "AC care, mehendi, plumbing & more — booked in minutes, at your door in hours.",
+    cta: "Explore services",
+    gradient: "linear-gradient(115deg,#053826 0%,#0c6b49 52%,#17a06a 100%)",
+    glow: "radial-gradient(closest-side, rgba(255,255,255,.28), rgba(255,255,255,0) 72%)",
+    motif: "home",
+  },
+  {
+    badge: "Why QuickQare",
+    title: "Verified pros. 2-hour response.",
+    subtitle: "Background-checked experts, secure payments and upfront pricing — every booking.",
+    cta: "See how it works",
+    gradient: "linear-gradient(115deg,#07100c 0%,#0e2019 55%,#123f2d 100%)",
+    glow: "radial-gradient(closest-side, rgba(23,160,106,.4), rgba(23,160,106,0) 72%)",
+    motif: "shield",
+  },
+  {
+    badge: "Festive ready",
+    title: "Bridal mehendi, at home.",
+    subtitle: "Organic cones and intricate designs — choose your length and number of hands at checkout.",
+    cta: "Book mehendi",
+    gradient: "linear-gradient(115deg,#4e1a0e 0%,#8a3714 55%,#c06a22 100%)",
+    glow: "radial-gradient(closest-side, rgba(255,214,170,.4), rgba(255,214,170,0) 72%)",
+    motif: "paisley",
+  },
+];
+
+// Fine grain overlay (data-URI) that keeps the gradients from reading flat.
+const BANNER_GRAIN =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
+
+const BannerMotif = ({ kind }: { kind: BannerMotifKind }) => {
+  const common = {
+    className: "absolute right-[-10px] top-1/2 -translate-y-1/2 w-[46%] max-w-[300px] text-white opacity-[0.16] pointer-events-none z-[2]",
+    viewBox: "0 0 200 200",
+    fill: "none" as const,
+    "aria-hidden": true,
+  };
+  if (kind === "home") return (
+    <svg {...common}>
+      <path d="M28 96 100 40l72 56" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M46 88v70h108V88" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M86 158v-40h28v40" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M150 44c14 6 20 20 14 32M158 30c22 9 30 32 20 51" stroke="currentColor" strokeWidth="5" strokeLinecap="round"/>
+    </svg>
+  );
+  if (kind === "shield") return (
+    <svg {...common}>
+      <path d="M100 26l58 22v42c0 40-26 66-58 84-32-18-58-44-58-84V48z" stroke="currentColor" strokeWidth="6" strokeLinejoin="round"/>
+      <path d="M74 100l18 18 36-40" stroke="currentColor" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+  return (
+    <svg {...common}>
+      <path d="M112 168c-40-8-70-40-70-78 0-26 18-46 40-46 18 0 30 14 30 30 0 14-10 24-22 24-9 0-16-6-16-15" stroke="currentColor" strokeWidth="5" strokeLinecap="round"/>
+      <circle cx="104" cy="70" r="7" stroke="currentColor" strokeWidth="4"/>
+      <path d="M112 168c6-2 40-16 40-58" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeDasharray="2 12"/>
+      <circle cx="150" cy="120" r="3" fill="currentColor"/><circle cx="150" cy="98" r="3" fill="currentColor"/>
+    </svg>
+  );
+};
+
 // ─── Category icon map ─────────────────────────────────────────────────────────
 const SLUG_ICONS: Record<string, React.FC<{ size?: number; color?: string }>> = {
   ac:          AcIcon,
@@ -392,7 +464,7 @@ export default function HomePage({ onLoginClick }: Props) {
   const [offers, setOffers] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
   const [bannerIndex, setBannerIndex] = useState(0);
-  const { emergency, homeTheme, socialLinks } = useAppConfig();
+  const { emergency, homeTheme, socialLinks, defaultBannerEnabled } = useAppConfig();
   const activeSocialLinks = (Object.keys(SOCIAL_ICON_MAP) as (keyof SocialLinks)[])
     .map((key) => ({ key, url: socialLinks[key].trim(), ...SOCIAL_ICON_MAP[key] }))
     .filter((s) => s.url);
@@ -429,13 +501,21 @@ export default function HomePage({ onLoginClick }: Props) {
     }).catch(() => {});
   }, []);
 
-  // Banner auto-rotate — respects per-banner displayDurationSeconds
+  // Fall back to the built-in promo slides when there are no admin banners
+  // (unless the admin turned the default banner off).
+  const showDefaultBanner = banners.length === 0 && defaultBannerEnabled;
+
+  // Banner auto-rotate — respects per-banner displayDurationSeconds for admin
+  // banners; default promo slides rotate on a fixed 5s cadence.
   useEffect(() => {
-    if (banners.length < 2) return;
-    const duration = (banners[bannerIndex]?.displayDurationSeconds ?? 5) * 1000;
-    const t = setTimeout(() => setBannerIndex((i) => (i + 1) % banners.length), duration);
+    const count = banners.length > 0
+      ? banners.length
+      : (showDefaultBanner ? DEFAULT_BANNER_SLIDES.length : 0);
+    if (count < 2) return;
+    const duration = banners.length > 0 ? (banners[bannerIndex]?.displayDurationSeconds ?? 5) * 1000 : 5000;
+    const t = setTimeout(() => setBannerIndex((i) => (i + 1) % count), duration);
     return () => clearTimeout(t);
-  }, [banners, bannerIndex]);
+  }, [banners, bannerIndex, showDefaultBanner]);
 
   useEffect(() => {
     client.get("/api/services")
@@ -815,6 +895,79 @@ export default function HomePage({ onLoginClick }: Props) {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Default promo banner — shown when no admin banner is active. Admin
+              can disable it from Settings. Gradients + line-art motifs, no image. */}
+          {showDefaultBanner && !search && (
+            <div className="relative w-full rounded-2xl overflow-hidden mt-6 mb-2 h-[180px] sm:h-[210px] isolate">
+              {DEFAULT_BANNER_SLIDES.map((s, i) => {
+                const on = i === (bannerIndex % DEFAULT_BANNER_SLIDES.length);
+                return (
+                  <div
+                    key={i}
+                    className={`absolute inset-0 flex items-center transition-opacity duration-700 ${on ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+                    style={{ background: s.gradient }}
+                  >
+                    {/* soft off-axis glow */}
+                    <div className="absolute z-[1] w-[60%] h-[150%] right-[-8%] top-[-30%] pointer-events-none" style={{ background: s.glow }} />
+                    {/* fine grain */}
+                    <div className="absolute inset-0 z-[2] opacity-[0.07] mix-blend-overlay pointer-events-none" style={{ backgroundImage: BANNER_GRAIN }} />
+                    <BannerMotif kind={s.motif} />
+
+                    <div
+                      key={on ? `on-${bannerIndex}` : `off-${i}`}
+                      className={`relative z-[3] px-5 sm:px-9 max-w-[80%] ${on ? "qq-banner-rise" : ""}`}
+                    >
+                      <span
+                        className="inline-block text-[9px] sm:text-[10px] font-extrabold tracking-[0.16em] text-white uppercase bg-white/[0.18] border border-white/25 px-2.5 py-1 rounded-full mb-3"
+                        style={{ animationDelay: "0.04s" }}
+                      >
+                        {s.badge}
+                      </span>
+                      <h3
+                        className="text-white font-extrabold text-xl sm:text-[32px] leading-[1.03] tracking-[-0.035em] text-balance"
+                        style={{ animationDelay: "0.10s", textShadow: "0 2px 20px rgba(0,0,0,.18)" }}
+                      >
+                        {s.title}
+                      </h3>
+                      <p
+                        className="text-white/90 text-[11.5px] sm:text-sm mt-1.5 leading-snug max-w-[42ch] line-clamp-2"
+                        style={{ animationDelay: "0.16s" }}
+                      >
+                        {s.subtitle}
+                      </p>
+                      <button
+                        onClick={() => servicesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                        className="group mt-3.5 inline-flex items-center gap-1.5 bg-white text-ink text-[11.5px] sm:text-[13px] font-extrabold px-4 py-2 rounded-full shadow-[0_8px_20px_-8px_rgba(0,0,0,0.4)] hover:bg-white/95 transition"
+                        style={{ animationDelay: "0.22s" }}
+                      >
+                        {s.cta}
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="transition-transform group-hover:translate-x-0.5">
+                          <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* progress bar (keyed to restart the fill each slide) */}
+              <div className="absolute left-0 bottom-0 z-[4] h-[3px] w-full bg-white/20">
+                <div key={bannerIndex} className="h-full bg-white/85 qq-banner-fill" />
+              </div>
+              {/* dots */}
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[4] flex gap-1.5">
+                {DEFAULT_BANNER_SLIDES.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setBannerIndex(i)}
+                    aria-label={`Show slide ${i + 1}`}
+                    className={`h-[7px] rounded-full transition-all ${i === (bannerIndex % DEFAULT_BANNER_SLIDES.length) ? "w-5 bg-white" : "w-[7px] bg-white/50"}`}
+                  />
+                ))}
+              </div>
             </div>
           )}
 
