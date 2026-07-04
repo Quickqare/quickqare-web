@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import BookingModal, { CartItem } from "../components/BookingModal";
 import { getMehendiPricingKey, isMehendiHandOption, isMehendiAddon } from "../utils/mehendiPricing";
@@ -18,6 +18,9 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
 
   const [bookingCart, setBookingCart] = useState<CartItem[] | null>(null);
   const [acPicker, setAcPicker] = useState<{ base: Service; variants: Service[] } | null>(null);
+  const [searchParams] = useSearchParams();
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const deepLinkDone = useRef(false);
 
   const category = categories.find((c) => toUrlSlug(c) === slug) ?? null;
   const isMehendiCat = /mehend|mehndi/i.test(category?.name || category?.slug || "");
@@ -52,6 +55,33 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
       .filter((s) => subCatName(s.subCategory).trim().toLowerCase() === target)
       .sort((a, b) => a.price - b.price);
   };
+
+  // Deep link from home search: /category/:slug?service=<id> scrolls to that
+  // service's card and highlights it. When the target is a variant option
+  // (e.g. "Window AC installation"), its base service's picker opens instead.
+  useEffect(() => {
+    if (loading || !category || deepLinkDone.current) return;
+    const targetId = searchParams.get("service");
+    if (!targetId) return;
+    deepLinkDone.current = true;
+    const svc = services.find((s) => s._id === targetId);
+    if (!svc) return;
+    let cardId = svc._id;
+    if (isVariantService(svc)) {
+      const sub = subCatName(svc.subCategory).trim();
+      const baseName = sub.slice(0, sub.length - OPTIONS_SUFFIX.length).trim().toLowerCase();
+      const base = services.find((s) => s.name.trim().toLowerCase() === baseName);
+      if (base) {
+        cardId = base._id;
+        setAcPicker({ base, variants: getVariantsFor(base) });
+      }
+    }
+    setHighlightId(cardId);
+    setTimeout(() => {
+      document.getElementById(`svc-${cardId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    setTimeout(() => setHighlightId(null), 2800);
+  }, [loading, category, services, searchParams]);
 
   const proceedToBook = (svc: Service) => {
     if (!user) { onLoginClick(); return; }
@@ -160,7 +190,11 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                 const variants = getVariantsFor(svc);
                 const fromPrice = variants.length ? variants[0].price : svc.price;
                 return (
-                  <div key={svc._id} className="bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col group">
+                  <div
+                    key={svc._id}
+                    id={`svc-${svc._id}`}
+                    className={`bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col group ${highlightId === svc._id ? "ring-2 ring-primary" : ""}`}
+                  >
                     <div className="relative w-full aspect-[3/2] bg-gray-50 overflow-hidden shrink-0">
                       {img ? (
                         <img
@@ -229,48 +263,78 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
             className="bg-white rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border sticky top-0 bg-white z-10">
-              <div>
-                <h3 className="font-bold text-ink text-sm">{acPicker.base.name}</h3>
-                <p className="text-xs text-muted mt-0.5">
-                  {acPicker.base.name.toLowerCase().includes("repair")
-                    ? "Choose the issue you're facing"
-                    : "Choose a type"}
-                </p>
+            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-3 min-w-0">
+                {(() => {
+                  const baseImg = acPicker.base.webImageUrl?.trim() || acPicker.base.imageUrl?.trim() || "";
+                  return baseImg ? (
+                    <img
+                      src={baseImg}
+                      alt={acPicker.base.name}
+                      className="w-11 h-11 rounded-lg object-cover shrink-0"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  ) : null;
+                })()}
+                <div className="min-w-0">
+                  <h3 className="font-bold text-ink text-sm truncate">{acPicker.base.name}</h3>
+                  <p className="text-xs text-muted mt-0.5">
+                    {acPicker.base.name.toLowerCase().includes("repair")
+                      ? "Choose the issue you're facing"
+                      : "Choose a type"}
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setAcPicker(null)}
-                className="text-gray-400 hover:text-ink text-2xl leading-none"
+                className="text-gray-400 hover:text-ink text-2xl leading-none shrink-0"
               >
                 ×
               </button>
             </div>
             <div className="p-4 space-y-3">
-              {acPicker.variants.map((v) => (
-                <div
-                  key={v._id}
-                  className="flex items-start justify-between gap-4 border border-border rounded-xl p-3.5 hover:border-primary transition"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-ink text-sm">
-                      {variantShortLabel(v.name, acPicker.base.name)}
-                    </p>
-                    {v.description && (
-                      <p className="text-xs text-muted mt-0.5 line-clamp-2">{v.description}</p>
-                    )}
-                    <p className="text-xs font-bold text-ink mt-1">
-                      ₹{v.price}
-                      {v.duration && <span className="text-muted font-normal"> · {v.duration} min</span>}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => proceedToBook(v)}
-                    className="shrink-0 self-center text-xs font-bold text-primary border border-primary rounded-lg px-4 py-2 hover:bg-primary hover:text-white transition"
+              {acPicker.variants.map((v) => {
+                const vImg = v.webImageUrl?.trim() || v.imageUrl?.trim() || "";
+                return (
+                  <div
+                    key={v._id}
+                    className="flex items-start gap-3 border border-border rounded-xl p-3.5 hover:border-primary transition"
                   >
-                    Book
-                  </button>
-                </div>
-              ))}
+                    <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                      {vImg ? (
+                        <img
+                          src={vImg}
+                          alt={v.name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <CategoryIcon slug={catSlug(v.category)} size={26} color="#D1D5DB" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-ink text-sm">
+                        {variantShortLabel(v.name, acPicker.base.name)}
+                      </p>
+                      {v.description && (
+                        <p className="text-xs text-muted mt-0.5 line-clamp-2">{v.description}</p>
+                      )}
+                      <p className="text-xs font-bold text-ink mt-1">
+                        ₹{v.price}
+                        {v.duration && <span className="text-muted font-normal"> · {v.duration} min</span>}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => proceedToBook(v)}
+                      className="shrink-0 self-center text-xs font-bold text-primary border border-primary rounded-lg px-4 py-2 hover:bg-primary hover:text-white transition"
+                    >
+                      Book
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

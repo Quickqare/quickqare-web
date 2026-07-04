@@ -4,7 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import client from "../api/client";
 import { useAppConfig, SocialLinks } from "../hooks/useAppConfig";
 import { CategoryIcon } from "../components/CategoryIcon";
-import { GroupedCategory, toUrlSlug, useServices } from "../lib/catalog";
+import { GroupedCategory, Service, isVariantService, toUrlSlug, useServices } from "../lib/catalog";
 
 type Props = { onLoginClick: () => void };
 
@@ -391,8 +391,49 @@ export default function HomePage({ onLoginClick }: Props) {
       )
     : categories;
 
+  // Individual services matching the search — surfaced as direct results so a
+  // query like "ac" shows "AC repair", "No cooling", "Window AC", etc., not
+  // just the category card.
+  const serviceResults: { svc: Service; cat: GroupedCategory }[] = q
+    ? categories.flatMap((cat) =>
+        cat.services
+          .filter(
+            (s) =>
+              s.name.toLowerCase().includes(q) ||
+              (s.description ?? "").toLowerCase().includes(q)
+          )
+          .map((svc) => ({ svc, cat }))
+      )
+    : [];
+
+  // Individual services with real photos, interleaved round-robin across
+  // categories — a dense catalog-style row (like a real storefront) instead of
+  // the page relying solely on the handful of category cards below. Skipped
+  // while searching since serviceResults already covers that case.
+  const topServices: { svc: Service; cat: GroupedCategory }[] = search
+    ? []
+    : (() => {
+        const perCat = categories.map((cat) =>
+          [...cat.services]
+            .filter((s) => !isVariantService(s) && (s.webImageUrl?.trim() || s.imageUrl?.trim()))
+            .sort((a, b) => a.price - b.price)
+        );
+        const merged: { svc: Service; cat: GroupedCategory }[] = [];
+        for (let i = 0; merged.length < 12 && perCat.some((arr) => arr.length > i); i++) {
+          categories.forEach((cat, ci) => {
+            if (perCat[ci][i]) merged.push({ svc: perCat[ci][i], cat });
+          });
+        }
+        return merged.slice(0, 12);
+      })();
+
   // Each category opens its own page.
   const openCategory = (cat: GroupedCategory) => navigate(`/category/${toUrlSlug(cat)}`);
+
+  // A service result deep-links into its category page, which scrolls to the
+  // service card (or opens the variant picker for nested options).
+  const openService = (svc: Service, cat: GroupedCategory) =>
+    navigate(`/category/${toUrlSlug(cat)}?service=${svc._id}`);
 
   return (
     <>
@@ -512,6 +553,50 @@ export default function HomePage({ onLoginClick }: Props) {
             </div>
           )}
 
+          {/* ── Top Services — individual service photos, catalog-dense ── */}
+          {topServices.length > 0 && (
+            <div className="mt-6">
+              <h2 className="text-[17px] font-extrabold text-ink tracking-tight mb-3">Top Services</h2>
+              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
+                {topServices.map(({ svc, cat }) => {
+                  const img = svc.webImageUrl?.trim() || svc.imageUrl?.trim() || "";
+                  return (
+                    <button
+                      key={svc._id}
+                      onClick={() => openService(svc, cat)}
+                      className="shrink-0 w-[152px] sm:w-[172px] bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 text-left group"
+                    >
+                      <div className="relative w-full aspect-[4/3] bg-gray-100 overflow-hidden">
+                        {img ? (
+                          <img
+                            src={img}
+                            alt={svc.name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                            <CategoryIcon slug={cat.slug} size={40} color="#D1D5DB" />
+                          </div>
+                        )}
+                        <span className="absolute top-2 left-2 bg-black/50 backdrop-blur-sm text-white text-[9px] font-bold px-2 py-0.5 rounded-full capitalize">
+                          {cat.name}
+                        </span>
+                      </div>
+                      <div className="p-2.5">
+                        <p className="font-bold text-ink text-[12px] tracking-tight leading-snug line-clamp-2 mb-1 min-h-[2.4em]">
+                          {svc.name}
+                        </p>
+                        <p className="text-[10px] text-muted -mb-0.5">from</p>
+                        <p className="font-extrabold text-ink text-sm">₹{svc.price}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* ── Offers section ── */}
           {offers.length > 0 && !search && (
             <div className="mt-6">
@@ -598,7 +683,7 @@ export default function HomePage({ onLoginClick }: Props) {
 
           {/* Banner carousel — admin-managed ads/offers, auto-rotating */}
           {banners.length > 0 && !search && (
-            <div className="relative w-full rounded-2xl overflow-hidden mt-6 mb-2" style={{ aspectRatio: "3/1" }}>
+            <div className="relative w-full lg:w-[calc(100%+2rem)] lg:-mx-4 xl:w-[calc(100%+5rem)] xl:-mx-10 rounded-2xl overflow-hidden mt-6 mb-2" style={{ aspectRatio: "3/1" }}>
               {banners.map((b, i) => {
                 const inner = (
                   <>
@@ -640,7 +725,7 @@ export default function HomePage({ onLoginClick }: Props) {
           {/* Default promo banner — shown when no admin banner is active. Admin
               can disable it from Settings. Gradients + line-art motifs, no image. */}
           {showDefaultBanner && !search && (
-            <div className="relative w-full rounded-2xl overflow-hidden mt-6 mb-2 h-[180px] sm:h-[210px] isolate">
+            <div className="relative w-full lg:w-[calc(100%+2rem)] lg:-mx-4 xl:w-[calc(100%+5rem)] xl:-mx-10 rounded-2xl overflow-hidden mt-6 mb-2 h-[180px] sm:h-[210px] isolate">
               {DEFAULT_BANNER_SLIDES.map((s, i) => {
                 const on = i === (bannerIndex % DEFAULT_BANNER_SLIDES.length);
                 return (
@@ -727,13 +812,59 @@ export default function HomePage({ onLoginClick }: Props) {
                 </div>
               ))}
             </div>
-          ) : filteredCategories.length === 0 ? (
+          ) : filteredCategories.length === 0 && serviceResults.length === 0 ? (
             <div className="text-center py-16 text-muted">
               <p className="text-4xl mb-3">🔍</p>
               <p className="font-semibold text-ink">No results for "{search}"</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            <>
+            {/* Matching individual services */}
+            {search && serviceResults.length > 0 && (
+              <div className="mb-6">
+                <p className="text-[11px] font-bold text-muted uppercase tracking-widest mb-2.5">Services</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {serviceResults.map(({ svc, cat }) => {
+                    const img = (svc.webImageUrl?.trim() || svc.imageUrl?.trim() || "");
+                    return (
+                      <button
+                        key={svc._id}
+                        onClick={() => openService(svc, cat)}
+                        className="bg-white rounded-2xl p-3 flex items-center gap-3 text-left shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 group"
+                      >
+                        <div className="w-14 h-14 rounded-xl bg-gray-50 overflow-hidden flex items-center justify-center shrink-0">
+                          {img ? (
+                            <img
+                              src={img}
+                              alt={svc.name}
+                              className="w-full h-full object-cover"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                            />
+                          ) : (
+                            <CategoryIcon slug={cat.slug} size={24} color="#9CA3AF" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-ink text-[13px] tracking-tight leading-snug truncate">{svc.name}</p>
+                          <p className="text-[10px] text-muted capitalize truncate">{cat.name}</p>
+                          <p className="text-xs font-extrabold text-ink mt-0.5">₹{svc.price}</p>
+                        </div>
+                        <svg className="w-3.5 h-3.5 text-gray-300 group-hover:text-ink transition-colors shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7"/>
+                        </svg>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {filteredCategories.length > 0 && (
+              <>
+              {search && serviceResults.length > 0 && (
+                <p className="text-[11px] font-bold text-muted uppercase tracking-widest mb-2.5">Categories</p>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {filteredCategories.map((cat, index) => (
                 <button
                   key={cat.id}
@@ -780,7 +911,10 @@ export default function HomePage({ onLoginClick }: Props) {
                   </div>
                 </button>
               ))}
-            </div>
+              </div>
+              </>
+            )}
+            </>
           )}
 
           {/* ── How it works ── */}
