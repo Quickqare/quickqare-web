@@ -19,11 +19,16 @@ export type HomeTheme = {
   };
 };
 
+export type SocialLinks = {
+  whatsapp: string; instagram: string; facebook: string; twitter: string; youtube: string;
+};
+
 export type AppConfig = {
   emergency: { bookingsDisabled: boolean; paymentsFreezed: boolean; emergencyLockdown: boolean };
   referral: { isEnabled: boolean; referrerRewardAmount: number; newUserDiscountAmount: number };
   pricing: { taxPercent: number; platformFeePercent: number; platformFeeFlatInr: number };
   homeTheme: HomeTheme;
+  socialLinks: SocialLinks;
 };
 
 const DEFAULT_THEME: HomeTheme = {
@@ -44,11 +49,16 @@ const DEFAULT_THEME: HomeTheme = {
   },
 };
 
+const DEFAULT_SOCIAL_LINKS: SocialLinks = {
+  whatsapp: "", instagram: "", facebook: "", twitter: "", youtube: "",
+};
+
 const DEFAULT: AppConfig = {
   emergency: { bookingsDisabled: false, paymentsFreezed: false, emergencyLockdown: false },
   referral: { isEnabled: true, referrerRewardAmount: 50, newUserDiscountAmount: 100 },
   pricing: { taxPercent: 18, platformFeePercent: 0, platformFeeFlatInr: 0 },
   homeTheme: DEFAULT_THEME,
+  socialLinks: DEFAULT_SOCIAL_LINKS,
 };
 
 function hexToRgbVars(hex: string): string {
@@ -106,6 +116,7 @@ export function useAppConfig() {
         referral:  res.data?.referral  ?? DEFAULT.referral,
         pricing:   res.data?.pricing   ?? DEFAULT.pricing,
         homeTheme: { ...DEFAULT_THEME, ...(res.data?.homeTheme ?? {}) },
+        socialLinks: { ...DEFAULT_SOCIAL_LINKS, ...(res.data?.socialLinks ?? {}) },
       };
       cached = c;
       setConfig(c);

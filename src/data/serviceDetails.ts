@@ -117,6 +117,7 @@ const buildMehendiTemplate = (name: string, price: number, desc?: string): Servi
     highlights: [
       "Single artist or multi-artist booking support",
       "Choose one hand or both hands at checkout",
+      "Organic cone made from natural ingredients",
       desc || "Bridal and festive mehendi with customizable design length",
     ],
     sections: [
