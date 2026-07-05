@@ -235,7 +235,7 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
     );
   };
 
-  const { pricing } = useAppConfig();
+  const { pricing, emergency } = useAppConfig();
   const discount = appliedCoupon?.discount ?? 0;
   const taxableAmount = Math.max(basePrice - discount, 0);
   const platformFeeAmount = Math.round(
@@ -772,9 +772,19 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
 
             {error && <p className="text-red-500 text-sm">{error}</p>}
 
-            <button className="btn-primary w-full" onClick={handleBook} disabled={loading}>
-              {loading ? "Processing…" : "Confirm & Pay"}
-            </button>
+            {(emergency.bookingsDisabled || emergency.paymentsFreezed || emergency.emergencyLockdown) ? (
+              <div className="w-full rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm font-medium px-4 py-3 text-center">
+                🚫 {emergency.emergencyLockdown
+                  ? "Platform is under maintenance. Please try again later."
+                  : emergency.bookingsDisabled
+                  ? "Bookings are temporarily unavailable."
+                  : "Payments are temporarily frozen. Please try again later."}
+              </div>
+            ) : (
+              <button className="btn-primary w-full" onClick={handleBook} disabled={loading}>
+                {loading ? "Processing…" : "Confirm & Pay"}
+              </button>
+            )}
           </div>
         )}
       </div>

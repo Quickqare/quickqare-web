@@ -100,35 +100,66 @@ function resetTheme() {
 
 let cached: AppConfig | null = null;
 
+// How often to re-check while the tab is open/visible, so an admin flipping an
+// emergency flag (bookingsDisabled/paymentsFreezed/emergencyLockdown) reaches a
+// tab that's already open, instead of requiring a hard refresh. Previously this
+// hook fetched ONCE per page load and cached forever — a tab left open through
+// a maintenance window would never see the flag change.
+const POLL_INTERVAL_MS = 60_000;
+
+function applyThemeIfNeeded(c: AppConfig) {
+  const appliesToWeb =
+    c.homeTheme.isActive &&
+    (c.homeTheme.targetPlatform === "web" || c.homeTheme.targetPlatform === "both");
+  if (appliesToWeb) applyTheme(c.homeTheme);
+  else resetTheme();
+}
+
 export function useAppConfig() {
   const [config, setConfig] = useState<AppConfig>(cached ?? DEFAULT);
 
   useEffect(() => {
-    if (cached) {
-      const appliesToWeb =
-        cached.homeTheme.isActive &&
-        (cached.homeTheme.targetPlatform === "web" || cached.homeTheme.targetPlatform === "both");
-      if (appliesToWeb) applyTheme(cached.homeTheme);
-      else resetTheme();
-      return;
-    }
-    client.get("/api/app-config").then((res) => {
-      const c: AppConfig = {
-        emergency: res.data?.emergency ?? DEFAULT.emergency,
-        referral:  res.data?.referral  ?? DEFAULT.referral,
-        pricing:   res.data?.pricing   ?? DEFAULT.pricing,
-        homeTheme: { ...DEFAULT_THEME, ...(res.data?.homeTheme ?? {}) },
-        socialLinks: { ...DEFAULT_SOCIAL_LINKS, ...(res.data?.socialLinks ?? {}) },
-        defaultBannerEnabled: res.data?.defaultBannerEnabled !== false,
-      };
-      cached = c;
-      setConfig(c);
-      const appliesToWeb =
-        c.homeTheme.isActive &&
-        (c.homeTheme.targetPlatform === "web" || c.homeTheme.targetPlatform === "both");
-      if (appliesToWeb) applyTheme(c.homeTheme);
-      else resetTheme();
-    }).catch(() => {});
+    // Render cached data instantly (no flash) while a fresh copy loads.
+    if (cached) applyThemeIfNeeded(cached);
+
+    const fetchConfig = () => {
+      client.get("/api/app-config").then((res) => {
+        const c: AppConfig = {
+          emergency: res.data?.emergency ?? DEFAULT.emergency,
+          referral:  res.data?.referral  ?? DEFAULT.referral,
+          pricing:   res.data?.pricing   ?? DEFAULT.pricing,
+          homeTheme: { ...DEFAULT_THEME, ...(res.data?.homeTheme ?? {}) },
+          socialLinks: { ...DEFAULT_SOCIAL_LINKS, ...(res.data?.socialLinks ?? {}) },
+          defaultBannerEnabled: res.data?.defaultBannerEnabled !== false,
+        };
+        cached = c;
+        setConfig(c);
+        applyThemeIfNeeded(c);
+      }).catch(() => {
+        // Network hiccup — keep showing whatever we already have (cached or
+        // DEFAULT). The next poll or visibility change tries again.
+      });
+    };
+
+    fetchConfig();
+
+    // Re-check when the tab regains focus — covers the common case of a
+    // customer leaving the booking tab open in the background during a
+    // maintenance window.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") fetchConfig();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    // Also poll periodically for tabs that just stay open and focused.
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchConfig();
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearInterval(interval);
+    };
   }, []);
 
   return config;

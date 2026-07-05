@@ -30,7 +30,7 @@ export default function ProfilePage() {
     setMsg("");
     setError("");
     try {
-      await client.put("/api/auth/profile", { name, email, gender });
+      await client.patch("/api/user/profile", { name, email, gender });
       await refreshUser();
       setMsg("Profile updated!");
       setEditing(false);

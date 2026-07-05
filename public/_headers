@@ -1,0 +1,21 @@
+# Security headers for the QuickQare customer web app.
+#
+# ⚠️ THIS FILE IS ONLY READ BY NETLIFY / CLOUDFLARE PAGES. Production serves this
+# app from nginx on the droplet (quickqare.in), which IGNORES this file. The
+# LIVE security headers are set in nginx — see the customer web server block in
+# quickqare-backend/deploy/nginx.quickqare.conf.example. Keep the CSP here in
+# sync with the CSP there. This file is kept for parity / in case the site is
+# ever moved to Netlify; on the droplet it has no effect.
+#
+# The resource CSP allowlist is scoped to exactly what the app loads: Razorpay
+# Checkout (script-src/frame-src) and the MSG91 widget + API/socket hosts
+# (connect-src). The only inline-friendly directive is style-src 'unsafe-inline'
+# (Tailwind/utility styles); there is no 'unsafe-inline'/'unsafe-eval' in
+# script-src, so injected inline scripts are blocked.
+/*
+  X-Frame-Options: SAMEORIGIN
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' https://checkout.razorpay.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.quickqare.in wss://api.quickqare.in https://control.msg91.com https://*.razorpay.com; frame-src https://api.razorpay.com https://*.razorpay.com
