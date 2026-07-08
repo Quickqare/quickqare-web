@@ -10,6 +10,15 @@ type BookingService = {
   quantity: number;
   category?: string;
   subCategory?: string;
+  // Cake customization snapshot (Celebration orders)
+  options?: {
+    flavour?: string;
+    weight?: string;
+    tiers?: number;
+    addons?: { name: string; price: number }[];
+    nameOnCake?: string;
+    referencePhotoUrl?: string;
+  };
 };
 
 type Booking = {
@@ -37,6 +46,9 @@ type Booking = {
   refundStatus?: string;
   completedAt?: string;
   createdAt: string;
+  // Cake orders refund by time since booking, not time to service
+  cancellationPolicyTypeSnapshot?: "BEFORE_SERVICE" | "SINCE_BOOKING";
+  sinceBookingTiersSnapshot?: { maxHoursAfterBooking: number; refundPercent: number }[];
 };
 
 type CancelState =
@@ -135,13 +147,33 @@ function BookingDetail({
           <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Services</p>
           <div className="space-y-1.5">
             {b.services.map((s, i) => (
-              <div key={i} className="flex justify-between items-start text-sm">
-                <div className="flex-1 min-w-0 pr-2">
-                  <span className="text-ink">{s.name}</span>
-                  {s.quantity > 1 && <span className="ml-1.5 text-muted text-xs">× {s.quantity}</span>}
-                  {s.subCategory && <span className="ml-1.5 text-xs text-primary">{s.subCategory}</span>}
+              <div key={i} className="text-sm">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1 min-w-0 pr-2">
+                    <span className="text-ink">{s.name}</span>
+                    {s.quantity > 1 && <span className="ml-1.5 text-muted text-xs">× {s.quantity}</span>}
+                    {s.subCategory && <span className="ml-1.5 text-xs text-primary">{s.subCategory}</span>}
+                  </div>
+                  <span className="text-ink shrink-0">₹{s.lineTotal?.toLocaleString("en-IN")}</span>
                 </div>
-                <span className="text-ink shrink-0">₹{s.lineTotal?.toLocaleString("en-IN")}</span>
+                {s.options?.flavour && (
+                  <div className="mt-1 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs text-amber-800">
+                    🎂 {[s.options.flavour, s.options.weight, Number(s.options.tiers) === 2 ? "2 tier" : "1 tier"].filter(Boolean).join(" · ")}
+                    {(s.options.addons?.length ?? 0) > 0 && (
+                      <> · Add-ons: {s.options.addons!.map((a) => a.name).join(", ")}</>
+                    )}
+                    {s.options.nameOnCake && <> · “{s.options.nameOnCake}”</>}
+                    {s.options.referencePhotoUrl && (
+                      <div className="mt-1.5">
+                        <img
+                          src={s.options.referencePhotoUrl}
+                          alt="Reference"
+                          className="w-14 h-14 object-cover rounded-md border border-amber-200"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -235,7 +267,19 @@ function BookingDetail({
             <div className="bg-red-50 border border-red-200 rounded-xl p-3 space-y-2">
               <p className="text-sm font-semibold text-red-700">Cancel this booking?</p>
               <p className="text-xs text-red-600">
-                Refund depends on how far in advance you cancel. More than 24h before → 100% refund.
+                {(() => {
+                  // Cake orders: refund is based on time since booking, not time to service.
+                  const sinceTiers = b.sinceBookingTiersSnapshot;
+                  if (b.cancellationPolicyTypeSnapshot === "SINCE_BOOKING" && sinceTiers?.length) {
+                    const first = sinceTiers[0];
+                    const lastPercent = sinceTiers[sinceTiers.length - 1]?.refundPercent ?? 50;
+                    const hoursSinceBooking = (Date.now() - new Date(b.createdAt).getTime()) / 36e5;
+                    return hoursSinceBooking <= first.maxHoursAfterBooking
+                      ? `You're within ${first.maxHoursAfterBooking}h of booking — you'll receive a ${first.refundPercent}% refund.`
+                      : `More than ${first.maxHoursAfterBooking}h have passed since booking — only ${lastPercent}% will be refunded.`;
+                  }
+                  return "Refund depends on how far in advance you cancel. More than 24h before → 100% refund.";
+                })()}
               </p>
               <div className="flex gap-2">
                 <button

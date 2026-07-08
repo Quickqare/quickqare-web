@@ -2,8 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 import client from "../api/client";
 import { useAppConfig } from "../hooks/useAppConfig";
 import { useAuth } from "../contexts/AuthContext";
-import { getSavedLocation } from "../pages/HomePage";
+import { getSavedLocation } from "../lib/location";
 import { getCartItemTotal, getMehendiPricingKey } from "../utils/mehendiPricing";
+
+export type CakeOptions = {
+  flavour: string;
+  weight?: string;
+  tiers: 1 | 2;
+  addons: { name: string; price: number }[];
+  nameOnCake: string;
+  referencePhotoUrl?: string;
+};
 
 export type CartItem = {
   cartKey: string;
@@ -15,6 +24,11 @@ export type CartItem = {
   parentName?: string;
   sectionTitle?: string;
   category?: string;
+  // Cake customization — re-validated and re-priced server-side; `price`
+  // holds the client-computed unit price for display only.
+  options?: CakeOptions;
+  // Minimum calendar days between booking and the scheduled date (cakes = 1).
+  minLeadDays?: number;
 };
 
 type Props = { cart: CartItem[]; onClose: () => void; onSuccess: (bookingId: string) => void };
@@ -47,6 +61,13 @@ function todayISO() {
   return new Date().toISOString().split("T")[0];
 }
 
+// ISO date `days` calendar days from now — used for advance-only orders (cakes).
+function isoDatePlusDays(days: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split("T")[0];
+}
+
 declare const Razorpay: any;
 
 export default function BookingModal({ cart, onClose, onSuccess }: Props) {
@@ -65,7 +86,13 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
     );
   };
 
-  const [date, setDate] = useState(todayISO());
+  // Advance-only orders (cakes): the earliest bookable date shifts forward by
+  // the cart's largest minLeadDays. The backend enforces the same rule.
+  const minLeadDays = cart.reduce((max, item) => Math.max(max, Number(item.minLeadDays) || 0), 0);
+  const minDateISO = minLeadDays > 0 ? isoDatePlusDays(minLeadDays) : todayISO();
+  const hasCakeItems = cart.some((item) => item.options?.flavour);
+
+  const [date, setDate] = useState(minDateISO);
   const [time, setTime] = useState("");
   const [address, setAddress] = useState("");
   const [houseDetails, setHouseDetails] = useState("");
@@ -137,7 +164,11 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
     try {
       const res = await client.post("/api/booking/available-slots", {
         date: forDate,
-        services: items.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })),
+        services: items.map((i) => ({
+          serviceId: i.serviceId,
+          quantity: i.quantity,
+          ...(i.options ? { options: i.options } : {}),
+        })),
         pincode: forPincode,
       });
       const slots: any[] = Array.isArray(res.data?.slots) ? res.data.slots : [];
@@ -305,7 +336,11 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
 
     try {
       const bookingRes = await client.post("/api/booking/create", {
-        services: items.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })),
+        services: items.map((i) => ({
+          serviceId: i.serviceId,
+          quantity: i.quantity,
+          ...(i.options ? { options: i.options } : {}),
+        })),
         scheduledDate: date,
         scheduledTime: time,
         address: address.trim(),
@@ -459,6 +494,32 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
               );
             })}
 
+            {/* Cake customization summary */}
+            {items.filter((item) => item.options?.flavour).map((item) => (
+              <div key={`cake-${item.cartKey}`} className="border border-amber-200 bg-amber-50 rounded-xl p-3.5">
+                <p className="font-bold text-amber-900 text-sm leading-snug">🎂 {item.name}</p>
+                <p className="text-xs text-amber-800 mt-1">
+                  {[item.options!.flavour, item.options!.weight, item.options!.tiers === 2 ? "2 tier" : "1 tier"].filter(Boolean).join(" · ")}
+                  {item.quantity > 1 ? ` · ×${item.quantity}` : ""}
+                </p>
+                {item.options!.addons.length > 0 && (
+                  <p className="text-xs text-amber-800 mt-0.5">
+                    Add-ons: {item.options!.addons.map((a) => a.name).join(", ")}
+                  </p>
+                )}
+                {item.options!.nameOnCake && (
+                  <p className="text-xs text-amber-800 mt-0.5">Name on cake: “{item.options!.nameOnCake}”</p>
+                )}
+                {item.options!.referencePhotoUrl && (
+                  <img
+                    src={item.options!.referencePhotoUrl}
+                    alt="Reference"
+                    className="w-16 h-16 object-cover rounded-lg border border-amber-200 mt-1.5"
+                  />
+                )}
+              </div>
+            ))}
+
             {/* Cart summary (when multiple items) */}
             {items.length > 1 && (
               <div className="bg-gray-50 rounded-xl p-3 space-y-1">
@@ -481,7 +542,12 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
             {/* Date */}
             <div>
               <label className="block text-sm font-medium text-ink mb-1.5">Preferred Date</label>
-              <input type="date" className="input" value={date} min={todayISO()} onChange={(e) => setDate(e.target.value)} />
+              <input type="date" className="input" value={date} min={minDateISO} onChange={(e) => setDate(e.target.value)} />
+              {minLeadDays > 0 && (
+                <p className="text-xs text-amber-700 mt-1">
+                  🕐 Cakes are baked to order — earliest delivery is {minLeadDays === 1 ? "tomorrow" : `${minLeadDays} days from today`}.
+                </p>
+              )}
             </div>
 
             {/* Time slots */}
@@ -769,6 +835,17 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
                 <span className="font-extrabold text-primary">₹{totalPayable.toLocaleString("en-IN")}</span>
               </div>
             </div>
+
+            {/* Cake cancellation policy — the customer must see this before paying */}
+            {hasCakeItems && (
+              <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3">
+                <p className="text-sm font-bold text-red-700 mb-1">Cancellation policy for cake orders</p>
+                <p className="text-xs text-red-800 leading-relaxed">
+                  • Cancel within 1 hour of booking for a full (100%) refund.<br />
+                  • After 1 hour, cancelling refunds only 50% of the amount paid.
+                </p>
+              </div>
+            )}
 
             {error && <p className="text-red-500 text-sm">{error}</p>}
 

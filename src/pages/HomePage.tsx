@@ -5,6 +5,7 @@ import client from "../api/client";
 import { useAppConfig, SocialLinks } from "../hooks/useAppConfig";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { GroupedCategory, Service, isVariantService, toUrlSlug, useServices } from "../lib/catalog";
+import { SavedLocation, getSavedLocation, persistLocation, geocodePosition, getSavedLocationLabel, setSavedLocationLabel } from "../lib/location";
 
 type Props = { onLoginClick: () => void };
 
@@ -140,47 +141,6 @@ const STEPS = [
   { n: "3", title: "Expert Arrives", desc: "A verified professional arrives at your door." },
 ];
 
-// ─── Location storage helpers ──────────────────────────────────────────────────
-const LOC_LABEL_KEY = "qq_web_location";
-const LOC_FULL_KEY  = "qq_web_loc_full";
-
-export type SavedLocation = {
-  address: string;
-  pincode: string;
-  latitude: number;
-  longitude: number;
-  label: string;
-};
-
-export function getSavedLocation(): SavedLocation | null {
-  try {
-    const raw = localStorage.getItem(LOC_FULL_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as SavedLocation;
-  } catch { return null; }
-}
-
-function persistLocation(loc: SavedLocation) {
-  localStorage.setItem(LOC_FULL_KEY, JSON.stringify(loc));
-  localStorage.setItem(LOC_LABEL_KEY, loc.label);
-}
-
-async function geocodePosition(latitude: number, longitude: number): Promise<SavedLocation | null> {
-  try {
-    // Use the backend Google geocoder (same source as BookingModal and the
-    // mobile app) so pincode/serviceability is consistent and we don't hit
-    // Nominatim's public-server rate limits / usage policy from the browser.
-    const res = await client.get(`/api/maps/reverse?lat=${latitude}&lng=${longitude}`);
-    const loc = res.data?.location;
-    if (!loc) return null;
-    const pincode = String(loc.pincode || "").replace(/\D/g, "").slice(0, 6);
-    const address = String(loc.address || "").trim();
-    const parts = [loc.area, loc.city].map((p: any) => String(p || "").trim()).filter(Boolean);
-    const label = parts.slice(0, 2).join(", ") || address.split(",")[0] || "Your location";
-    return { address: address || label, pincode, latitude, longitude, label };
-  } catch { return null; }
-}
-
 // ─── Location prompt modal ─────────────────────────────────────────────────────
 function LocationPromptModal({ onDone }: { onDone: (loc: SavedLocation) => void }) {
   const [step, setStep] = useState<"prompt" | "detecting" | "manual">("prompt");
@@ -311,7 +271,7 @@ function LocationPromptModal({ onDone }: { onDone: (loc: SavedLocation) => void 
 
 // ─── Location hook ─────────────────────────────────────────────────────────────
 function useLocation() {
-  const [locationText, setLocationText] = useState(() => localStorage.getItem(LOC_LABEL_KEY) || "");
+  const [locationText, setLocationText] = useState(() => getSavedLocationLabel());
   const [showPicker, setShowPicker] = useState(false);
   const [manualInput, setManualInput] = useState("");
 
@@ -323,7 +283,7 @@ function useLocation() {
     const v = manualInput.trim();
     if (!v) return;
     setLocationText(v);
-    localStorage.setItem(LOC_LABEL_KEY, v);
+    setSavedLocationLabel(v);
     setShowPicker(false);
     setManualInput("");
   };

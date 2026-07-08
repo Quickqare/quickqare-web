@@ -1,8 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import client from "../api/client";
+import { getSavedLocation } from "./location";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type CategoryObj = { _id: string; name: string; slug?: string; imageUrl?: string; webImageUrl?: string };
+
+export type CakeWeight = { label: string; priceDelta: number };
+export type CakeFlavour = { name: string; priceDelta: number };
+export type CakeAddon = { name: string; price: number };
+export type ServiceCustomization = {
+  weights: CakeWeight[];
+  flavours: CakeFlavour[];
+  twoTierPriceDelta: number;
+  addons: CakeAddon[];
+  nameOnCakeEnabled: boolean;
+};
 
 export type Service = {
   _id: string; name: string; price: number; description?: string;
@@ -11,7 +23,24 @@ export type Service = {
   subCategory?: { _id: string; name: string } | string | null;
   duration?: number; isActive?: boolean;
   isHighlighted?: boolean; highlightOrder?: number;
+  // Cake (Celebration) fields
+  customization?: ServiceCustomization | null;
+  ingredients?: string[];
+  media360?: string[];
+  minLeadDays?: number;
+  isEggless?: boolean;
+  cancellationPolicyType?: "BEFORE_SERVICE" | "SINCE_BOOKING";
+  sinceBookingTiers?: { maxHoursAfterBooking: number; refundPercent: number }[];
+  // Set server-side only for cake/Celebration services, only when the
+  // customer's location is known — whether a baker covering their area has
+  // declared they can make this specific cake. Undefined = unknown/not
+  // computed (no location yet, or not a cake service) — never treat as false.
+  availableNearby?: boolean;
 };
+
+// A cake-style service: customization options configured by the admin.
+export const isCakeService = (svc: Service): boolean =>
+  Boolean(svc.customization?.flavours && svc.customization.flavours.length > 0);
 
 export type GroupedCategory = {
   id: string; name: string; slug: string; imageUrl: string;
@@ -89,7 +118,13 @@ export function useServices() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    client.get("/api/services")
+    const loc = getSavedLocation();
+    const params = new URLSearchParams();
+    if (loc?.pincode) params.set("pincode", loc.pincode);
+    if (loc?.latitude) params.set("lat", String(loc.latitude));
+    if (loc?.longitude) params.set("lng", String(loc.longitude));
+    const qs = params.toString();
+    client.get(`/api/services${qs ? `?${qs}` : ""}`)
       .then((res) => {
         const raw = res.data;
         const list: Service[] = Array.isArray(raw) ? raw

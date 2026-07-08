@@ -43,12 +43,25 @@ const ElectricianIcon = ({ size = 28, color = "#0A0A0A" }: { size?: number; colo
   </svg>
 );
 
+const CakeIcon = ({ size = 28, color = "#0A0A0A" }: { size?: number; color?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 28 28" fill="none">
+    <circle cx="14" cy="4" r="1.4" fill={color}/>
+    <line x1="14" y1="6.5" x2="14" y2="10" stroke={color} strokeWidth="1.6" strokeLinecap="round"/>
+    <path d="M9 14v-2.5a1.5 1.5 0 0 1 1.5-1.5h7A1.5 1.5 0 0 1 19 11.5V14" stroke={color} strokeWidth="1.6"/>
+    <path d="M4.5 22v-5.5A2.5 2.5 0 0 1 7 14h14a2.5 2.5 0 0 1 2.5 2.5V22" stroke={color} strokeWidth="1.6"/>
+    <path d="M4.5 17.5c1.6 0 1.6 1.6 3.2 1.6s1.6-1.6 3.2-1.6 1.6 1.6 3.2 1.6 1.6-1.6 3.2-1.6 1.6 1.6 3.2 1.6 1.6-1.6 3.2-1.6" stroke={color} strokeWidth="1.3" strokeLinecap="round" opacity="0.6"/>
+    <line x1="2.5" y1="22.5" x2="25.5" y2="22.5" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+  </svg>
+);
+
 const SLUG_ICONS: Record<string, React.FC<{ size?: number; color?: string }>> = {
   ac:          AcIcon,
   plumbing:    PlumbingIcon,
   mehendi:     MehendiIcon,
   mehndi:      MehendiIcon,
   electrician: ElectricianIcon,
+  celebration: CakeIcon,
+  cake:        CakeIcon,
 };
 
 export function getCatIcon(slug: string): React.FC<{ size?: number; color?: string }> {
@@ -66,7 +79,8 @@ export function CategoryIcon({ slug, size, color }: { slug: string; size: number
   const k = slug.toLowerCase();
   const ci = homeTheme.categoryIcons;
   let url = "";
-  if (k.includes("ac")) url = ci.acRepair ?? "";
+  if (k.includes("celebrat") || k.includes("cake")) url = ci.celebration ?? "";
+  else if (k.includes("ac")) url = ci.acRepair ?? "";
   else if (k.includes("plumb")) url = ci.plumbing ?? "";
   else if (k.includes("mehend") || k.includes("mehndi")) url = ci.mehendi ?? "";
   else if (k.includes("electric")) url = ci.electrician ?? "";

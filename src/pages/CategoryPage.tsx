@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import BookingModal, { CartItem } from "../components/BookingModal";
+import CakeCustomizerModal from "../components/CakeCustomizerModal";
 import { getMehendiPricingKey, isMehendiHandOption, isMehendiAddon } from "../utils/mehendiPricing";
 import { getServiceTemplate } from "../data/serviceDetails";
 import { CategoryIcon } from "../components/CategoryIcon";
 import {
-  Service, catName, catSlug, subCatName, isVariantService, variantShortLabel,
+  Service, catName, catSlug, subCatName, isCakeService, isVariantService, variantShortLabel,
   OPTIONS_SUFFIX, toUrlSlug, useServices,
 } from "../lib/catalog";
 
@@ -18,6 +19,7 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
 
   const [bookingCart, setBookingCart] = useState<CartItem[] | null>(null);
   const [acPicker, setAcPicker] = useState<{ base: Service; variants: Service[] } | null>(null);
+  const [cakePicker, setCakePicker] = useState<Service | null>(null);
   const [searchParams] = useSearchParams();
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const deepLinkDone = useRef(false);
@@ -100,6 +102,12 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
   };
 
   const handleBookClick = (svc: Service) => {
+    // Cakes open the customizer (flavour / tiers / add-ons / name) first.
+    if (isCakeService(svc)) {
+      if (!user) { onLoginClick(); return; }
+      setCakePicker(svc);
+      return;
+    }
     const variants = getVariantsFor(svc);
     if (variants.length > 0) {
       setAcPicker({ base: svc, variants });
@@ -189,11 +197,12 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                 const img = (svc.webImageUrl?.trim() || svc.imageUrl?.trim() || "");
                 const variants = getVariantsFor(svc);
                 const fromPrice = variants.length ? variants[0].price : svc.price;
+                const unavailable = isCakeService(svc) && svc.availableNearby === false;
                 return (
                   <div
                     key={svc._id}
                     id={`svc-${svc._id}`}
-                    className={`bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col group ${highlightId === svc._id ? "ring-2 ring-primary" : ""}`}
+                    className={`bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col group ${highlightId === svc._id ? "ring-2 ring-primary" : ""} ${unavailable ? "opacity-60 grayscale-[35%] hover:-translate-y-0 hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]" : ""}`}
                   >
                     <div className="relative w-full aspect-[3/2] bg-gray-50 overflow-hidden shrink-0">
                       {img ? (
@@ -214,6 +223,11 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                       {svc.duration && (
                         <div className="absolute top-3 right-3 bg-black/40 backdrop-blur-sm text-white text-[11px] font-semibold px-2.5 py-1 rounded-full">
                           ⏱ {svc.duration} min
+                        </div>
+                      )}
+                      {unavailable && (
+                        <div className="absolute top-3 left-3 bg-red-50/95 border border-red-200 text-red-600 text-[10px] font-semibold px-2.5 py-1 rounded-full">
+                          Not available in your area
                         </div>
                       )}
                     </div>
@@ -239,9 +253,10 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                         </div>
                         <button
                           onClick={() => handleBookClick(svc)}
-                          className="btn-primary text-xs px-3 py-1.5"
+                          disabled={unavailable}
+                          className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {variants.length > 0 ? "Choose" : "Book"}
+                          {unavailable ? "Unavailable" : variants.length > 0 ? "Choose" : "Book"}
                         </button>
                       </div>
                     </div>
@@ -341,6 +356,17 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
       )}
 
       {/* Booking modal */}
+      {cakePicker && (
+        <CakeCustomizerModal
+          cake={cakePicker}
+          onClose={() => setCakePicker(null)}
+          onContinue={(item) => {
+            setCakePicker(null);
+            setBookingCart([item]);
+          }}
+        />
+      )}
+
       {bookingCart && (
         <BookingModal
           cart={bookingCart}

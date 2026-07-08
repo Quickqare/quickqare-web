@@ -16,6 +16,7 @@ export type HomeTheme = {
     plumbing: string; plumbingShimmer: boolean;
     mehendi: string; mehendiShimmer: boolean;
     electrician: string; electricianShimmer: boolean;
+    celebration: string; celebrationShimmer: boolean;
   };
 };
 
@@ -47,6 +48,7 @@ const DEFAULT_THEME: HomeTheme = {
     plumbing: "", plumbingShimmer: true,
     mehendi: "", mehendiShimmer: true,
     electrician: "", electricianShimmer: true,
+    celebration: "", celebrationShimmer: true,
   },
 };
 
