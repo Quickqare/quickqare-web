@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useAuth } from "../contexts/AuthContext";
 import BookingModal, { CartItem } from "../components/BookingModal";
 import CakeCustomizerModal from "../components/CakeCustomizerModal";
+import PhotoCarousel from "../components/PhotoCarousel";
 import { getMehendiPricingKey, isMehendiHandOption, isMehendiAddon } from "../utils/mehendiPricing";
 import { getServiceTemplate } from "../data/serviceDetails";
 import { CategoryIcon } from "../components/CategoryIcon";
@@ -194,7 +195,12 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {catServices.map((svc) => {
-                const img = (svc.webImageUrl?.trim() || svc.imageUrl?.trim() || "");
+                // Web-only photo gallery (webMedia360) — arrows + dots on the
+                // card when there's more than one photo; a single web photo
+                // takes over as the card image. The app's gallery (media360)
+                // is never shown here.
+                const galleryPhotos = svc.webMedia360?.length ? svc.webMedia360 : [];
+                const img = (galleryPhotos[0] || svc.webImageUrl?.trim() || svc.imageUrl?.trim() || "");
                 const variants = getVariantsFor(svc);
                 const fromPrice = variants.length ? variants[0].price : svc.price;
                 const unavailable = isCakeService(svc) && svc.availableNearby === false;
@@ -205,7 +211,15 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                     className={`bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col group ${highlightId === svc._id ? "ring-2 ring-primary" : ""} ${unavailable ? "opacity-60 grayscale-[35%] hover:-translate-y-0 hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]" : ""}`}
                   >
                     <div className="relative w-full aspect-[3/2] bg-gray-50 overflow-hidden shrink-0">
-                      {img ? (
+                      {galleryPhotos.length > 1 ? (
+                        <PhotoCarousel
+                          photos={galleryPhotos}
+                          alt={svc.name}
+                          imgClassName="object-contain"
+                          autoSlide={svc.autoSlideEnabled !== false}
+                          intervalMs={(Number(svc.autoSlideSeconds) > 0 ? Number(svc.autoSlideSeconds) : 3) * 1000}
+                        />
+                      ) : img ? (
                         <img
                           src={img}
                           alt={svc.name}
@@ -217,7 +231,7 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                           }}
                         />
                       ) : null}
-                      <div className={`absolute inset-0 flex items-center justify-center ${img ? "hidden" : ""}`}>
+                      <div className={`absolute inset-0 flex items-center justify-center ${galleryPhotos.length > 1 || img ? "hidden" : ""}`}>
                         <CategoryIcon slug={catSlug(svc.category)} size={52} color="#D1D5DB" />
                       </div>
                       {svc.duration && (

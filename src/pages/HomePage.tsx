@@ -4,7 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import client from "../api/client";
 import { useAppConfig, SocialLinks } from "../hooks/useAppConfig";
 import { CategoryIcon } from "../components/CategoryIcon";
-import { GroupedCategory, Service, isVariantService, toUrlSlug, useServices } from "../lib/catalog";
+import { GroupedCategory, Service, toUrlSlug, useServices } from "../lib/catalog";
 import { SavedLocation, getSavedLocation, persistLocation, geocodePosition, getSavedLocationLabel, setSavedLocationLabel } from "../lib/location";
 
 type Props = { onLoginClick: () => void };
@@ -368,13 +368,17 @@ export default function HomePage({ onLoginClick }: Props) {
 
   // "Highlights" — services the admin has flagged as highlighted (isHighlighted)
   // in the admin panel, ordered by highlightOrder then price. Capped at 4.
+  // Admin's flag is the sole gate here — unlike the category grid, variant
+  // services (e.g. "Split AC installation") are allowed through: clicking one
+  // deep-links to its base service's picker (see CategoryPage's `service`
+  // query-param handling), so it resolves correctly even without its own card.
   // Skipped while searching since serviceResults covers that case.
   const HIGHLIGHTS_MAX = 4;
   const topServices: { svc: Service; cat: GroupedCategory }[] = search
     ? []
     : categories
         .flatMap((cat) => cat.services.map((svc) => ({ svc, cat })))
-        .filter(({ svc }) => svc.isHighlighted && !isVariantService(svc))
+        .filter(({ svc }) => svc.isHighlighted)
         .sort(
           (a, b) =>
             (a.svc.highlightOrder ?? 0) - (b.svc.highlightOrder ?? 0) ||

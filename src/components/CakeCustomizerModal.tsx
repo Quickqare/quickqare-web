@@ -22,8 +22,17 @@ type Props = {
  */
 export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props) {
   const customization = cake.customization!;
+
+  // Per-section admin toggles (undefined = enabled). When flavour selection is
+  // off, the first flavour silently applies as the fixed default.
+  const flavoursOn = customization.flavoursEnabled !== false;
+  const weightsOn = customization.weightsEnabled !== false && (customization.weights?.length || 0) > 0;
+  const tiersOn = customization.tiersEnabled !== false;
+  const addonsOn = customization.addonsEnabled !== false && customization.addons.length > 0;
+  const refPhotoOn = customization.referencePhotoEnabled !== false;
+
   const [flavour, setFlavour] = useState(customization.flavours[0]?.name || "");
-  const [weight, setWeight] = useState(customization.weights?.[0]?.label || "");
+  const [weight, setWeight] = useState(weightsOn ? customization.weights?.[0]?.label || "" : "");
   const [tiers, setTiers] = useState<1 | 2>(1);
   const [addonNames, setAddonNames] = useState<string[]>([]);
   const [nameOnCake, setNameOnCake] = useState("");
@@ -144,6 +153,7 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
           )}
 
           {/* Flavour */}
+          {flavoursOn && (
           <div>
             <p className="text-sm font-bold text-ink mb-2">Choose flavour</p>
             <div className="space-y-2">
@@ -169,9 +179,10 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
               ))}
             </div>
           </div>
+          )}
 
           {/* Weight */}
-          {(customization.weights?.length || 0) > 0 && (
+          {weightsOn && (
             <div>
               <p className="text-sm font-bold text-ink mb-2">Choose weight</p>
               <div className="space-y-2">
@@ -200,6 +211,7 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
           )}
 
           {/* Tiers */}
+          {tiersOn && (
           <div>
             <p className="text-sm font-bold text-ink mb-2">Tiers</p>
             <div className="grid grid-cols-2 gap-2.5">
@@ -222,9 +234,10 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
               ))}
             </div>
           </div>
+          )}
 
           {/* Add-ons */}
-          {customization.addons.length > 0 && (
+          {addonsOn && (
             <div>
               <p className="text-sm font-bold text-ink mb-2">Add-ons</p>
               <div className="space-y-2">
@@ -268,6 +281,7 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
           )}
 
           {/* Reference photo — "make it look like this" */}
+          {refPhotoOn && (
           <div>
             <p className="text-sm font-bold text-ink mb-2">Reference photo (optional)</p>
             {referencePhotoUrl ? (
@@ -300,6 +314,7 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
             />
             {referencePhotoError && <p className="text-xs text-red-600 mt-1">{referencePhotoError}</p>}
           </div>
+          )}
 
           {/* Cancellation policy — shown before ordering */}
           <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3">
@@ -317,7 +332,7 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
           <div>
             <p className="font-extrabold text-ink text-lg leading-none">₹{unitPrice.toLocaleString("en-IN")}</p>
             <p className="text-xs text-muted mt-1">
-              {[flavour, weight, tiers === 2 ? "2 tier" : "1 tier"].filter(Boolean).join(" · ")}
+              {[flavour, weight, tiersOn ? (tiers === 2 ? "2 tier" : "1 tier") : ""].filter(Boolean).join(" · ")}
               {addonNames.length ? ` · ${addonNames.length} add-on${addonNames.length > 1 ? "s" : ""}` : ""}
             </p>
           </div>

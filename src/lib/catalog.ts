@@ -14,6 +14,13 @@ export type ServiceCustomization = {
   twoTierPriceDelta: number;
   addons: CakeAddon[];
   nameOnCakeEnabled: boolean;
+  // Per-section admin toggles — undefined means enabled (older records).
+  // When flavoursEnabled is false the first flavour applies as the fixed default.
+  flavoursEnabled?: boolean;
+  weightsEnabled?: boolean;
+  tiersEnabled?: boolean;
+  addonsEnabled?: boolean;
+  referencePhotoEnabled?: boolean;
 };
 
 export type Service = {
@@ -27,6 +34,12 @@ export type Service = {
   customization?: ServiceCustomization | null;
   ingredients?: string[];
   media360?: string[];
+  // Web-only photo gallery (admin uploads separately from the app's media360).
+  webMedia360?: string[];
+  // Admin toggle: false = gallery photos don't auto-rotate (app + web).
+  autoSlideEnabled?: boolean;
+  // Seconds each photo stays before sliding to the next (default 3).
+  autoSlideSeconds?: number;
   minLeadDays?: number;
   isEggless?: boolean;
   cancellationPolicyType?: "BEFORE_SERVICE" | "SINCE_BOOKING";
