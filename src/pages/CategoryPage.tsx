@@ -302,7 +302,7 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                   <div
                     key={svc._id}
                     id={`svc-${svc._id}`}
-                    className={`bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col group ${highlightId === svc._id ? "ring-2 ring-primary" : ""} ${unavailable ? "opacity-60 grayscale-[35%] hover:-translate-y-0 hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]" : ""}`}
+                    className={`bg-white rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_28px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col group ${highlightId === svc._id ? "ring-2 ring-primary" : ""}`}
                   >
                     <div className="relative w-full aspect-[3/2] bg-gray-50 overflow-hidden shrink-0">
                       {galleryPhotos.length > 1 ? (
