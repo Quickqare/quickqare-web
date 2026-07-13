@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import BookingModal, { CartItem } from "../components/BookingModal";
+import BookingModal, { CartItem, MAX_MEHENDI_HANDS } from "../components/BookingModal";
 import CakeCustomizerModal from "../components/CakeCustomizerModal";
 import PhotoCarousel from "../components/PhotoCarousel";
-import { getMehendiPricingKey, isMehendiHandOption, isMehendiAddon } from "../utils/mehendiPricing";
+import {
+  getMehendiPricingKey, isMehendiHandOption, isMehendiAddon,
+  isRestrictedMehendiFeetOnly, isBridalMehendi, hasMehendiHandInCart, getCartItemTotal,
+} from "../utils/mehendiPricing";
 import { getServiceTemplate } from "../data/serviceDetails";
 import { CategoryIcon } from "../components/CategoryIcon";
 import {
   Service, catName, catSlug, subCatName, isCakeService, isVariantService, variantShortLabel,
   OPTIONS_SUFFIX, toUrlSlug, useServices,
 } from "../lib/catalog";
+
+const normalizeSvcName = (name: string): string =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 export default function CategoryPage({ onLoginClick }: { onLoginClick: () => void }) {
   const { catSlug: slug = "" } = useParams<{ catSlug: string }>();
@@ -24,6 +30,16 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
   const [searchParams] = useSearchParams();
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const deepLinkDone = useRef(false);
+
+  // Mehendi is the one category where a customer routinely wants more than one
+  // service in the same booking (a hand design + a feet add-on) — the backend
+  // requires Basic Feet/Ankle/Above Ankle to arrive alongside a hand design in
+  // the SAME booking, and rejects them alone. The mobile app handles this with
+  // an accumulating cart that blocks adding a restricted feet-only item until a
+  // hand design is already in it; this mirrors that here instead of letting the
+  // customer reach payment before finding out the combination is invalid.
+  const [mehendiCart, setMehendiCart] = useState<CartItem[]>([]);
+  const [mehendiNotice, setMehendiNotice] = useState("");
 
   const category = categories.find((c) => toUrlSlug(c) === slug) ?? null;
   const isMehendiCat = /mehend|mehndi/i.test(category?.name || category?.slug || "");
@@ -117,6 +133,84 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
     proceedToBook(svc);
   };
 
+  // ── Mehendi cart (add-before-checkout, matching the mobile app) ──────────────
+  const mehendiQty = (svc: Service): number =>
+    mehendiCart.find((i) => i.serviceId === svc._id)?.quantity ?? 0;
+
+  const addMehendiItem = (svc: Service) => {
+    setMehendiNotice("");
+    if (isRestrictedMehendiFeetOnly(svc.name) && !hasMehendiHandInCart(mehendiCart)) {
+      setMehendiNotice(
+        "Add a Mehendi hand design first — Basic Feet, Ankle, and Above Ankle add-ons can only be booked together with one. Mid Leg and Below Knee can be booked separately."
+      );
+      return;
+    }
+    const isBridal = isBridalMehendi(svc.name);
+    setMehendiCart((prev) => {
+      const existing = prev.find((i) => i.serviceId === svc._id);
+      const next = existing
+        ? prev.map((i) =>
+            i.serviceId === svc._id
+              ? { ...i, quantity: Math.min(i.quantity + 1, MAX_MEHENDI_HANDS) }
+              : i
+          )
+        : [
+            ...prev,
+            {
+              cartKey: svc._id,
+              serviceId: svc._id,
+              name: svc.name,
+              price: svc.price,
+              quantity: 1,
+              pricingKey: getMehendiPricingKey(svc.name),
+              category: catName(svc.category),
+            },
+          ];
+      // Bridal mehendi includes a complimentary Basic Feet line, same as the app.
+      const complimentaryKey = `${svc._id}:complimentary-basic-feet`;
+      if (isBridal && !existing && !next.some((i) => i.cartKey === complimentaryKey)) {
+        const feet = category?.services.find((s) => normalizeSvcName(s.name) === "basic feet" || normalizeSvcName(s.name) === "feet");
+        if (feet) {
+          next.push({
+            cartKey: complimentaryKey,
+            serviceId: feet._id,
+            name: "Basic Feet",
+            price: 0,
+            quantity: 1,
+            category: catName(svc.category),
+          });
+        }
+      }
+      return next;
+    });
+  };
+
+  const removeMehendiItem = (svc: Service) => {
+    setMehendiNotice("");
+    setMehendiCart((prev) => {
+      const existing = prev.find((i) => i.serviceId === svc._id);
+      if (!existing) return prev;
+      const nextQty = existing.quantity - 1;
+      let next = nextQty > 0
+        ? prev.map((i) => (i.serviceId === svc._id ? { ...i, quantity: nextQty } : i))
+        : prev.filter((i) => i.serviceId !== svc._id);
+      // Dropping the last hand design also drops its free complimentary feet line.
+      if (nextQty <= 0) {
+        next = next.filter((i) => i.cartKey !== `${svc._id}:complimentary-basic-feet`);
+      }
+      return next;
+    });
+  };
+
+  const mehendiCartItemCount = mehendiCart.reduce((sum, item) => sum + item.quantity, 0);
+  const mehendiCartTotal = mehendiCart.reduce((sum, item) => sum + getCartItemTotal(item, mehendiCart), 0);
+  const mehendiCartOriginal = mehendiCart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+  const proceedMehendiCheckout = () => {
+    if (!user) { onLoginClick(); return; }
+    setBookingCart(mehendiCart);
+  };
+
   if (loading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -139,7 +233,7 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
   return (
     <>
       <div className="bg-bg min-h-screen">
-        <div className="max-w-6xl mx-auto px-4 py-6">
+        <div className={`max-w-6xl mx-auto px-4 py-6 ${isMehendiCat && mehendiCartItemCount > 0 ? "pb-24" : ""}`}>
 
           {/* Back link */}
           <Link
@@ -216,14 +310,15 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                           photos={galleryPhotos}
                           alt={svc.name}
                           imgClassName="object-contain"
-                          autoSlide={svc.autoSlideEnabled !== false}
-                          intervalMs={(Number(svc.autoSlideSeconds) > 0 ? Number(svc.autoSlideSeconds) : 3) * 1000}
+                          autoSlide={svc.webAutoSlideEnabled !== false}
+                          intervalMs={(Number(svc.webAutoSlideSeconds) > 0 ? Number(svc.webAutoSlideSeconds) : 3) * 1000}
                         />
                       ) : img ? (
                         <img
                           src={img}
                           alt={svc.name}
                           className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
+                          loading="lazy"
                           onError={(e) => {
                             const el = e.target as HTMLImageElement;
                             el.style.display = "none";
@@ -265,13 +360,45 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                             </span>
                           )}
                         </div>
-                        <button
-                          onClick={() => handleBookClick(svc)}
-                          disabled={unavailable}
-                          className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {unavailable ? "Unavailable" : variants.length > 0 ? "Choose" : "Book"}
-                        </button>
+                        {isMehendiCat ? (
+                          mehendiQty(svc) > 0 ? (
+                            <div className="flex items-center border border-primary rounded-lg overflow-hidden shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => removeMehendiItem(svc)}
+                                className="w-7 h-7 flex items-center justify-center text-primary font-bold text-base hover:bg-primary/10 transition"
+                              >
+                                −
+                              </button>
+                              <span className="min-w-[1.75rem] text-center text-xs font-bold text-ink">
+                                {mehendiQty(svc)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => addMehendiItem(svc)}
+                                disabled={mehendiQty(svc) >= MAX_MEHENDI_HANDS}
+                                className="w-7 h-7 flex items-center justify-center text-primary font-bold text-base hover:bg-primary/10 transition disabled:opacity-30"
+                              >
+                                +
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => addMehendiItem(svc)}
+                              className="btn-primary text-xs px-3 py-1.5"
+                            >
+                              Add
+                            </button>
+                          )
+                        ) : (
+                          <button
+                            onClick={() => handleBookClick(svc)}
+                            disabled={unavailable}
+                            className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {unavailable ? "Unavailable" : variants.length > 0 ? "Choose" : "Book"}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -281,6 +408,41 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
           )}
         </div>
       </div>
+
+      {/* Mehendi cart notice — e.g. "add a hand design first" when a restricted
+          feet add-on is tapped before any hand design is in the cart. */}
+      {isMehendiCat && mehendiNotice && (
+        <div className="fixed inset-x-0 bottom-24 z-40 flex justify-center px-4 pointer-events-none">
+          <div className="bg-amber-50 border border-amber-300 text-amber-800 text-sm font-medium rounded-xl px-4 py-3 shadow-lg max-w-md text-center pointer-events-auto">
+            {mehendiNotice}
+          </div>
+        </div>
+      )}
+
+      {/* Mehendi cart bar — lets a hand design and its feet add-ons accumulate
+          into one booking, matching the mobile app's flow, before checkout. */}
+      {isMehendiCat && mehendiCartItemCount > 0 && (
+        <div className="fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
+          <div className="bg-white border border-border rounded-2xl shadow-xl px-5 py-3.5 flex items-center gap-4 w-full max-w-md">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-baseline gap-2">
+                {mehendiCartTotal < mehendiCartOriginal && (
+                  <span className="text-xs text-muted line-through">
+                    ₹{mehendiCartOriginal.toLocaleString("en-IN")}
+                  </span>
+                )}
+                <span className="font-extrabold text-ink">₹{mehendiCartTotal.toLocaleString("en-IN")}</span>
+              </div>
+              <p className="text-[11px] text-muted mt-0.5">
+                {mehendiCartItemCount} item{mehendiCartItemCount > 1 ? "s" : ""} added
+              </p>
+            </div>
+            <button onClick={proceedMehendiCheckout} className="btn-primary text-sm px-5 py-2.5 shrink-0">
+              View Cart
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* AC option picker (Split/Window, repair issue) */}
       {acPicker && (
@@ -335,6 +497,7 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                           src={vImg}
                           alt={v.name}
                           className="w-full h-full object-cover"
+                          loading="lazy"
                           onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                         />
                       ) : (
@@ -387,6 +550,7 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
           onClose={() => setBookingCart(null)}
           onSuccess={(bookingId) => {
             setBookingCart(null);
+            setMehendiCart([]);
             navigate(`/bookings/${bookingId}`);
           }}
         />

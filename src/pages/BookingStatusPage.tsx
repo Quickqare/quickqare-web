@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { io, Socket } from "socket.io-client";
 import client from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
+import { localDateISOPlusDays } from "../lib/date";
 
 const SOCKET_URL = ((import.meta as any).env.VITE_API_BASE_URL || "")
   .replace(/\/api\/?$/, "") || window.location.origin;
@@ -305,7 +306,7 @@ export default function BookingStatusPage() {
               type="date"
               className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 mb-3"
               value={rescheduleDate}
-              min={new Date(Date.now() + 86400000).toISOString().split("T")[0]}
+              min={localDateISOPlusDays(1)}
               onChange={(e) => handleSelectRescheduleDate(e.target.value)}
             />
             {rescheduleDate && (
@@ -490,13 +491,26 @@ export default function BookingStatusPage() {
 
       {/* Actions */}
       <div className="space-y-3">
-        <button onClick={() => navigate(`/complaints/new?bookingId=${bookingId}`)} className="w-full card p-4 text-left flex items-center gap-3 hover:border-primary transition">
-          <span className="text-xl">📝</span>
-          <div>
-            <p className="font-semibold text-ink text-sm">Raise a Complaint</p>
-            <p className="text-xs text-muted">Report an issue with this booking</p>
+        {/* The backend only accepts complaints against COMPLETED/CANCELLED
+            bookings — showing this as a live action on an in-progress booking
+            would deep-link somewhere that always rejects the submission. */}
+        {["COMPLETED", "CANCELLED"].includes(booking.status) ? (
+          <button onClick={() => navigate(`/complaints/new?bookingId=${bookingId}`)} className="w-full card p-4 text-left flex items-center gap-3 hover:border-primary transition">
+            <span className="text-xl">📝</span>
+            <div>
+              <p className="font-semibold text-ink text-sm">Raise a Complaint</p>
+              <p className="text-xs text-muted">Report an issue with this booking</p>
+            </div>
+          </button>
+        ) : (
+          <div className="w-full card p-4 flex items-center gap-3 opacity-60">
+            <span className="text-xl">📝</span>
+            <div>
+              <p className="font-semibold text-ink text-sm">Raise a Complaint</p>
+              <p className="text-xs text-muted">Available once this booking is completed or cancelled</p>
+            </div>
           </div>
-        </button>
+        )}
 
         {isCancellable && (
           <div>

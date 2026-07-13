@@ -3,6 +3,7 @@ import client from "../api/client";
 import { useAppConfig } from "../hooks/useAppConfig";
 import { useAuth } from "../contexts/AuthContext";
 import { getSavedLocation } from "../lib/location";
+import { localDateISO, localDateISOPlusDays } from "../lib/date";
 import { getCartItemTotal, getMehendiPricingKey } from "../utils/mehendiPricing";
 
 export type CakeOptions = {
@@ -49,24 +50,14 @@ const TIME_SLOTS: { value: string; label: string }[] = [
 
 const LABEL_ICONS: Record<string, string> = { Home: "🏠", Work: "💼", Other: "📍" };
 
-// Matches the mobile app's per-service cap for mehendi hands.
-const MAX_MEHENDI_HANDS = 25;
+// Matches the mobile app's per-service cap for mehendi hands. Exported so
+// CategoryPage's mehendi cart (add/remove before checkout) uses the same cap.
+export const MAX_MEHENDI_HANDS = 25;
 
 // A cart item is a mehendi hand design (choose 1–25 hands) when it resolves to
 // a hand-pricing key — either explicitly or derived from its name.
 const isMehendiHandsItem = (item: CartItem): boolean =>
   Boolean(item.pricingKey ?? getMehendiPricingKey(item.name));
-
-function todayISO() {
-  return new Date().toISOString().split("T")[0];
-}
-
-// ISO date `days` calendar days from now — used for advance-only orders (cakes).
-function isoDatePlusDays(days: number) {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split("T")[0];
-}
 
 declare const Razorpay: any;
 
@@ -84,12 +75,30 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
           : it
       )
     );
+    // The server priced this coupon against the OLD subtotal and handed back a
+    // fixed rupee discount. Changing the hand count changes the subtotal, so that
+    // number no longer holds (and the coupon's minimum-order rule may no longer
+    // be met). Drop it rather than show a total we won't actually charge — the
+    // code stays in the box so re-applying is one click.
+    if (appliedCoupon) {
+      setAppliedCoupon(null);
+      setCouponError("Coupon cleared — re-apply it for the updated total.");
+    }
+    // loadAvailableCoupons() caches this list and skips re-fetching whenever it
+    // already has entries — a fine assumption for a static cart, but the hand
+    // count changing the subtotal means a coupon shown here might no longer
+    // meet its minimum-order rule, or a new one might now qualify. Clear the
+    // cache and close the panel (rather than leave it open showing the stale
+    // list, or briefly flashing "No coupons available" against an empty
+    // cache) so the next open re-fetches against the current basePrice.
+    setAvailableCoupons([]);
+    setShowCoupons(false);
   };
 
   // Advance-only orders (cakes): the earliest bookable date shifts forward by
   // the cart's largest minLeadDays. The backend enforces the same rule.
   const minLeadDays = cart.reduce((max, item) => Math.max(max, Number(item.minLeadDays) || 0), 0);
-  const minDateISO = minLeadDays > 0 ? isoDatePlusDays(minLeadDays) : todayISO();
+  const minDateISO = minLeadDays > 0 ? localDateISOPlusDays(minLeadDays) : localDateISO();
   const hasCakeItems = cart.some((item) => item.options?.flavour);
 
   const [date, setDate] = useState(minDateISO);
@@ -186,20 +195,31 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(items)]);
 
-  // Re-fetch slots when date changes (only if pincode already known)
+  // One fetch, driven by everything that can change what's available: the date,
+  // the area (pincode), and the cart itself — partner capacity depends on
+  // headcount, so a slot free for 2 mehendi hands may be full for 10, and
+  // `fetchSlots` takes a fresh identity whenever `items` changes. fetchSlots
+  // itself handles an incomplete pincode (clears availability, no request).
   useEffect(() => {
-    if (pincode.length === 6) {
-      setTime("");
-      fetchSlots(date, pincode);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date]);
+    fetchSlots(date, pincode);
+  }, [date, pincode, fetchSlots]);
 
-  // Fetch slots once pincode becomes valid (GPS fill or manual entry)
+  // The one invariant, mirroring the app's CreateBookingScreen: a slot that
+  // isn't in the current availability list cannot stay selected.
+  //
+  // This used to be three separate `setTime("")` calls, one in each of the
+  // effects above — and the pincode one was missing, so a slot picked for one
+  // area survived into an area where it was full. The selected style outranks
+  // the unavailable style, so the customer kept a green "10:00 AM" that the
+  // server then refused at create. Stating the rule once means the next input
+  // added here can't reintroduce that bug by forgetting to clear.
+  //
+  // `null` means loading/unknown, not "nothing available" — don't clear on it.
   useEffect(() => {
-    if (pincode.length === 6) fetchSlots(date, pincode);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pincode]);
+    if (time && availableSlotTimes && !availableSlotTimes.includes(time)) {
+      setTime("");
+    }
+  }, [availableSlotTimes, time]);
 
   const applyAddress = (addr: any) => {
     setAddress(addr.address || "");
@@ -278,8 +298,10 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
   );
   const totalPayable = taxableAmount + platformFeeAmount + gstAmount;
 
-  const applyCoupon = async () => {
-    const code = couponInput.trim().toUpperCase();
+  // `rawCode` lets a caller apply a code it has in hand rather than waiting for
+  // the couponInput state to flush — see applyFromList.
+  const applyCoupon = async (rawCode?: string) => {
+    const code = (rawCode ?? couponInput).trim().toUpperCase();
     if (!code) return;
     setCouponLoading(true);
     setCouponError("");
@@ -322,7 +344,10 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
   const applyFromList = (code: string) => {
     setCouponInput(code);
     setShowCoupons(false);
-    applyCoupon();
+    // Pass the code explicitly: setCouponInput above is async, so applyCoupon()
+    // would still read the *previous* couponInput (empty on the first pick) and
+    // bail out at its own empty-code guard, silently applying nothing.
+    applyCoupon(code);
   };
 
   const handleBook = async () => {
@@ -330,6 +355,18 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
     if (!address.trim()) return setError("Please enter your address.");
     if (!pincode.trim() || !/^\d{6}$/.test(pincode.trim()))
       return setError("Please enter a valid 6-digit pincode.");
+
+    // Checkout.js is a <script> in index.html, and ad blockers routinely eat it.
+    // Bail out BEFORE creating the booking: reaching `new Razorpay()` with the
+    // script missing throws a ReferenceError only after /booking/create and
+    // /payment/order have already succeeded, stranding a PENDING_PAYMENT booking
+    // and a live Razorpay order behind a generic error.
+    if (typeof Razorpay === "undefined") {
+      return setError(
+        "Couldn't load the payment window. Disable any ad blocker for this site and try again."
+      );
+    }
+
     setError("");
     setLoading(true);
     setStep("paying");
@@ -770,7 +807,7 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
                   />
                   <button
                     className="px-4 py-2 rounded-xl border border-primary text-primary text-sm font-semibold hover:bg-primary hover:text-white transition disabled:opacity-50"
-                    onClick={applyCoupon}
+                    onClick={() => applyCoupon()}
                     disabled={couponLoading || !couponInput.trim()}
                   >
                     {couponLoading ? "…" : "Apply"}
@@ -858,8 +895,20 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
                   : "Payments are temporarily frozen. Please try again later."}
               </div>
             ) : (
-              <button className="btn-primary w-full" onClick={handleBook} disabled={loading}>
-                {loading ? "Processing…" : "Confirm & Pay"}
+              // Availability is reconciled against the selection once the fetch
+              // resolves, so block paying while it's in flight — otherwise the
+              // brief window where a slot from the previous date/area is still
+              // highlighted is long enough to click through and be rejected.
+              <button
+                className="btn-primary w-full"
+                onClick={handleBook}
+                disabled={loading || slotsLoading}
+              >
+                {loading
+                  ? "Processing…"
+                  : slotsLoading
+                  ? "Checking availability…"
+                  : "Confirm & Pay"}
               </button>
             )}
           </div>

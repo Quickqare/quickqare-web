@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import client from "../api/client";
+import { useAppConfig } from "../hooks/useAppConfig";
 
 type Stats = { totalReferrals: number; totalEarned: number; pendingAmount: number };
 type HistoryItem = { _id: string; referredUser?: { name: string; phone: string }; status: string; rewardAmount: number; createdAt: string };
@@ -9,6 +10,7 @@ function fmtDate(d: string) {
 }
 
 export default function ReferralPage() {
+  const { referral } = useAppConfig();
   const [code, setCode] = useState("");
   const [stats, setStats] = useState<Stats | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -67,7 +69,7 @@ export default function ReferralPage() {
           {[
             { icon: "📤", text: "Share your code with friends" },
             { icon: "📲", text: "Friend signs up and books using your code" },
-            { icon: "💰", text: `You earn ₹${stats ? 50 : "—"} · Friend gets a discount` },
+            { icon: "💰", text: `You earn ₹${referral.referrerRewardAmount} · Friend gets a discount` },
           ].map((s, i) => (
             <div key={i} className="flex items-center gap-3">
               <span className="text-xl w-8 text-center">{s.icon}</span>

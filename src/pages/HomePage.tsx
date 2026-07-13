@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import client from "../api/client";
-import { useAppConfig, SocialLinks } from "../hooks/useAppConfig";
-import { CategoryIcon } from "../components/CategoryIcon";
+import { useAppConfig } from "../hooks/useAppConfig";
+import { CategoryIcon, catConfigKey } from "../components/CategoryIcon";
 import { GroupedCategory, Service, toUrlSlug, useServices } from "../lib/catalog";
-import { SavedLocation, getSavedLocation, persistLocation, geocodePosition, getSavedLocationLabel, setSavedLocationLabel } from "../lib/location";
+import { SavedLocation, getSavedLocation, persistLocation, geocodePosition, getSavedLocationLabel } from "../lib/location";
+import { safeExternalUrl } from "../lib/safeUrl";
 
 type Props = { onLoginClick: () => void };
 
@@ -22,46 +23,6 @@ const ChevronDown = ({ size = 10, color = "white" }: { size?: number; color?: st
     <path d="M1 1l4 4 4-4" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 );
-
-// ─── Social icons ───────────────────────────────────────────────────────────────
-const WhatsAppIcon = ({ size = 18, color = "#0A0A0A" }: { size?: number; color?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
-    <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.39 1.26 4.81L2 22l5.42-1.35c1.37.73 2.94 1.15 4.62 1.15h.01c5.46 0 9.9-4.45 9.9-9.9C21.95 6.45 17.5 2 12.04 2zm5.72 14.13c-.24.68-1.4 1.3-1.93 1.38-.5.08-1.13.11-1.82-.12-.42-.13-.96-.31-1.65-.61-2.9-1.25-4.79-4.17-4.94-4.36-.14-.2-1.18-1.57-1.18-3 0-1.42.75-2.12 1.02-2.41.27-.29.58-.36.78-.36.19 0 .39 0 .56.01.18.01.42-.07.65.5.24.58.82 2 .89 2.15.07.14.12.31.02.5-.09.19-.14.31-.28.48-.14.16-.29.36-.42.48-.14.14-.28.28-.12.56.16.28.72 1.19 1.55 1.93 1.06.95 1.96 1.24 2.24 1.38.28.14.44.12.6-.07.16-.19.68-.79.86-1.06.18-.28.36-.23.6-.14.24.09 1.55.73 1.82.86.27.14.45.2.51.31.07.12.07.66-.17 1.34z"/>
-  </svg>
-);
-const InstagramIcon = ({ size = 18, color = "#0A0A0A" }: { size?: number; color?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" stroke={color} strokeWidth="1.8"/>
-    <circle cx="12" cy="12" r="4.3" stroke={color} strokeWidth="1.8"/>
-    <circle cx="17.4" cy="6.6" r="1.15" fill={color}/>
-  </svg>
-);
-const FacebookIcon = ({ size = 18, color = "#0A0A0A" }: { size?: number; color?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
-    <path d="M15.12 8.5H13V7c0-.75.5-.93.85-.93h1.22V3.6L13.06 3.6C10.68 3.6 10.1 5.36 10.1 6.86V8.5H8.3v3h1.8V21h2.9v-9.5h2.09l.33-3z"/>
-  </svg>
-);
-const XIcon = ({ size = 18, color = "#0A0A0A" }: { size?: number; color?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
-    <path d="M18.24 3H21l-6.35 7.26L22 21h-6.24l-4.88-6.4L5.3 21H2.5l6.8-7.77L2 3h6.4l4.4 5.86L18.24 3zm-1.1 16h1.53L7 4.9H5.36L17.14 19z"/>
-  </svg>
-);
-const YouTubeIcon = ({ size = 18, color = "#0A0A0A" }: { size?: number; color?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
-    <path d="M22 12c0-2.1-.2-3.5-.4-4.2-.3-.8-.9-1.4-1.7-1.7C18.8 5.7 12 5.7 12 5.7s-6.8 0-7.9.4c-.8.3-1.4.9-1.7 1.7C2.2 8.5 2 9.9 2 12s.2 3.5.4 4.2c.3.8.9 1.4 1.7 1.7 1.1.4 7.9.4 7.9.4s6.8 0 7.9-.4c.8-.3 1.4-.9 1.7-1.7.2-.7.4-2.1.4-4.2zM10 15.2V8.8l5.5 3.2-5.5 3.2z"/>
-  </svg>
-);
-
-const SOCIAL_ICON_MAP: Record<
-  keyof SocialLinks,
-  { Icon: React.FC<{ size?: number; color?: string }>; label: string }
-> = {
-  whatsapp:  { Icon: WhatsAppIcon,  label: "WhatsApp" },
-  instagram: { Icon: InstagramIcon, label: "Instagram" },
-  facebook:  { Icon: FacebookIcon,  label: "Facebook" },
-  twitter:   { Icon: XIcon,         label: "X" },
-  youtube:   { Icon: YouTubeIcon,   label: "YouTube" },
-};
 
 // ─── Built-in default promo slides ───────────────────────────────────────────
 // Shown in the home banner slot when no admin banner is active (and the admin
@@ -142,7 +103,12 @@ const STEPS = [
 ];
 
 // ─── Location prompt modal ─────────────────────────────────────────────────────
-function LocationPromptModal({ onDone }: { onDone: (loc: SavedLocation) => void }) {
+// Shown on first visit (no saved location — not dismissible) and when the
+// header's location pill is clicked (`onClose` provided — dismissible). Both
+// paths persist the FULL location record (pincode/coords via GPS geocoding or
+// a validated pincode), never just a display label: a label-only "save" here
+// once let the header show a new city while bookings kept using the old one.
+function LocationPromptModal({ onDone, onClose }: { onDone: (loc: SavedLocation) => void; onClose?: () => void }) {
   const [step, setStep] = useState<"prompt" | "detecting" | "manual">("prompt");
   const [pincodeInput, setPincodeInput] = useState("");
   const [error, setError] = useState("");
@@ -204,7 +170,16 @@ function LocationPromptModal({ onDone }: { onDone: (loc: SavedLocation) => void 
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="bg-[#0A0A0A] px-6 pt-6 pb-5 text-center">
+        <div className="relative bg-[#0A0A0A] px-6 pt-6 pb-5 text-center">
+          {onClose && (
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center text-white/50 hover:text-white text-2xl leading-none transition"
+            >
+              ×
+            </button>
+          )}
           <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-3">
             <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -273,22 +248,12 @@ function LocationPromptModal({ onDone }: { onDone: (loc: SavedLocation) => void 
 function useLocation() {
   const [locationText, setLocationText] = useState(() => getSavedLocationLabel());
   const [showPicker, setShowPicker] = useState(false);
-  const [manualInput, setManualInput] = useState("");
 
   const applyLocation = (loc: SavedLocation) => {
     setLocationText(loc.label);
   };
 
-  const saveManual = () => {
-    const v = manualInput.trim();
-    if (!v) return;
-    setLocationText(v);
-    setSavedLocationLabel(v);
-    setShowPicker(false);
-    setManualInput("");
-  };
-
-  return { locationText, showPicker, setShowPicker, manualInput, setManualInput, saveManual, applyLocation };
+  return { locationText, showPicker, setShowPicker, applyLocation };
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
@@ -300,10 +265,7 @@ export default function HomePage({ onLoginClick }: Props) {
   const [offers, setOffers] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
   const [bannerIndex, setBannerIndex] = useState(0);
-  const { emergency, socialLinks, defaultBannerEnabled } = useAppConfig();
-  const activeSocialLinks = (Object.keys(SOCIAL_ICON_MAP) as (keyof SocialLinks)[])
-    .map((key) => ({ key, url: socialLinks[key].trim(), ...SOCIAL_ICON_MAP[key] }))
-    .filter((s) => s.url);
+  const { emergency, defaultBannerEnabled, homeIconAnimationEnabled, homeIconAnimation } = useAppConfig();
   const [showLocationPrompt, setShowLocationPrompt] = useState(() => !getSavedLocation());
 
   // Ref on the "Popular Services" heading so the promo banner CTA can scroll to it.
@@ -475,7 +437,7 @@ export default function HomePage({ onLoginClick }: Props) {
               {banners.map((b, i) => {
                 const inner = (
                   <>
-                    <img src={b.imageUrl} alt={b.title || ""} className="w-full h-full object-cover" />
+                    <img src={b.imageUrl} alt={b.title || ""} className="w-full h-full object-cover" loading={i === 0 ? undefined : "lazy"} />
                     {b.title && (
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-4">
                         <p className="text-white font-bold text-base">{b.title}</p>
@@ -483,13 +445,16 @@ export default function HomePage({ onLoginClick }: Props) {
                     )}
                   </>
                 );
+                // A banner with an unsafe link (e.g. `javascript:`) still shows its
+                // artwork — it just isn't clickable.
+                const href = safeExternalUrl(b.linkUrl);
                 return (
                   <div
                     key={b._id}
                     className={`absolute inset-0 transition-opacity duration-700 ${i === bannerIndex ? "opacity-100" : "opacity-0"}`}
                   >
-                    {b.linkUrl ? (
-                      <a href={b.linkUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                    {href ? (
+                      <a href={href} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
                         {inner}
                       </a>
                     ) : inner}
@@ -593,20 +558,41 @@ export default function HomePage({ onLoginClick }: Props) {
                     <div className="h-2.5 w-12 bg-gray-200 rounded animate-pulse"/>
                   </div>
                 ))
-              : filteredCategories.map((cat) => (
+              : filteredCategories.map((cat, i) => {
+                  // Admin-gated: master "Home Icon Animation" toggle plus the
+                  // per-icon style (categories without a dedicated admin entry
+                  // fall back to the default bob whenever the master is on).
+                  const animKey = catConfigKey(cat.slug);
+                  const style = homeIconAnimationEnabled
+                    ? animKey ? homeIconAnimation[animKey] : "bob"
+                    : "none";
+                  const animClass =
+                    style === "bob"    ? "animate-float" :
+                    style === "bounce" ? "animate-icon-bounce" :
+                    style === "tada"   ? "animate-icon-tada" :
+                    undefined;
+                  return (
                   <button
                     key={cat.id}
                     onClick={() => openCategory(cat)}
                     className="flex flex-col items-center gap-2 shrink-0 w-[72px] group"
                   >
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-white shadow-sm transition-all duration-300 hover:-translate-y-2 hover:scale-110 hover:shadow-md">
-                      <CategoryIcon slug={cat.slug} size={26} color="#0A0A0A" />
+                    {/* Float loop lives on the wrapper so the inner hover
+                        transform still composes with it. */}
+                    <div
+                      className={animClass}
+                      style={animClass ? { animationDelay: `${i * 0.18}s` } : undefined}
+                    >
+                      <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-white shadow-sm transition-all duration-300 hover:-translate-y-2 hover:scale-110 hover:shadow-md">
+                        <CategoryIcon slug={cat.slug} size={26} color="#0A0A0A" />
+                      </div>
                     </div>
                     <span className="text-[11px] font-bold text-center leading-tight tracking-tight text-[#6B7280] group-hover:text-ink transition-colors">
                       {cat.name.charAt(0).toUpperCase() + cat.name.slice(1)}
                     </span>
                   </button>
-                ))
+                  );
+                })
             }
           </div>
 
@@ -754,6 +740,7 @@ export default function HomePage({ onLoginClick }: Props) {
                               src={img}
                               alt={svc.name}
                               className="w-full h-full object-cover"
+                              loading="lazy"
                               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                             />
                           ) : (
@@ -793,6 +780,7 @@ export default function HomePage({ onLoginClick }: Props) {
                         src={cat.imageUrl}
                         alt={cat.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        loading="lazy"
                         onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                       />
                     ) : (
@@ -852,6 +840,7 @@ export default function HomePage({ onLoginClick }: Props) {
                             src={img}
                             alt={svc.name}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                            loading="lazy"
                             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                           />
                         ) : (
@@ -908,60 +897,20 @@ export default function HomePage({ onLoginClick }: Props) {
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="border-t border-border py-6 px-4 mt-8">
-          <div className="max-w-6xl mx-auto flex flex-col gap-4">
-            {activeSocialLinks.length > 0 && (
-              <div className="flex items-center justify-center md:justify-start gap-3">
-                {activeSocialLinks.map(({ key, url, Icon, label }) => (
-                  <a
-                    key={key}
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={label}
-                    title={label}
-                    className="w-9 h-9 rounded-full border border-border flex items-center justify-center text-muted hover:text-ink hover:border-ink transition"
-                  >
-                    <Icon size={16} color="currentColor" />
-                  </a>
-                ))}
-              </div>
-            )}
-            <div className="flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-muted">
-              <span>© {new Date().getFullYear()} QuickQare. All rights reserved.</span>
-              <div className="flex items-center gap-5">
-                <Link to="/privacy-policy" className="hover:text-ink transition-colors">Privacy Policy</Link>
-                <Link to="/terms" className="hover:text-ink transition-colors">Terms & Conditions</Link>
-                <Link to="/refund-policy" className="hover:text-ink transition-colors">Refund Policy</Link>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
-      {/* ── Location picker modal ── */}
+      {/* ── Location picker modal (header pill) — same GPS/pincode flow as the
+          first-run prompt, so changing location here re-persists the full
+          record (pincode/coords) and re-scopes the catalog, not just the
+          header text. ── */}
       {loc.showPicker && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-          <div className="card w-full max-w-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-ink">Set Location</h3>
-              <button onClick={() => loc.setShowPicker(false)} className="text-gray-400 hover:text-ink text-2xl leading-none">×</button>
-            </div>
-            <input
-              className="input mb-3"
-              placeholder="Enter your area, colony, city…"
-              value={loc.manualInput}
-              onChange={(e) => loc.setManualInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && loc.saveManual()}
-              autoFocus
-            />
-            <button className="btn-primary w-full" onClick={loc.saveManual}>
-              Save Location
-            </button>
-          </div>
-        </div>
+        <LocationPromptModal
+          onDone={(savedLoc) => {
+            loc.applyLocation(savedLoc);
+            loc.setShowPicker(false);
+          }}
+          onClose={() => loc.setShowPicker(false)}
+        />
       )}
 
     </>

@@ -13,6 +13,7 @@ export default function RatingModal({ bookingId, onClose }: Props) {
   const [review, setReview] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
 
   const tags = stars >= 4 ? TAGS_GOOD : TAGS_BAD;
 
@@ -22,17 +23,30 @@ export default function RatingModal({ bookingId, onClose }: Props) {
   const handleSubmit = async () => {
     if (stars === 0) return;
     if (stars <= 2 && !review.trim()) return;
+    setError("");
     setSubmitting(true);
     try {
       await client.post("/api/ratings", {
         bookingId,
         rating: stars,
         tags: selectedTags,
-        review: review.trim() || undefined,
+        // The API reads this as `reviewText` (controllers/rating.controller.js).
+        // Sending `review` meant every written review was silently dropped —
+        // including the ones the modal *requires* for a 1–2 star rating.
+        reviewText: review.trim() || undefined,
       });
       setSubmitted(true);
       setTimeout(onClose, 1500);
-    } catch { onClose(); } finally { setSubmitting(false); }
+    } catch (e: any) {
+      // Previously closed the modal on any failure, same as clicking Skip —
+      // indistinguishable from success to the customer, and the booking's
+      // pending-rating prompt doesn't reliably resurface until next login, so
+      // a transient network error silently cost them the chance to rate.
+      // Keep the modal open with a visible error so they can retry.
+      setError(e.response?.data?.message || "Could not submit your rating. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -97,6 +111,8 @@ export default function RatingModal({ bookingId, onClose }: Props) {
                 />
               </div>
             )}
+
+            {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
 
             <div className="flex gap-3">
               <button

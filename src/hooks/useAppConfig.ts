@@ -24,6 +24,15 @@ export type SocialLinks = {
   whatsapp: string; instagram: string; facebook: string; twitter: string; youtube: string;
 };
 
+export type HomeIconAnimStyle = "none" | "bob" | "bounce" | "tada";
+
+/** Per-icon animation style — only consulted when homeIconAnimationEnabled
+    (the master switch) is true. */
+export type HomeIconAnimation = {
+  acRepair: HomeIconAnimStyle; plumbing: HomeIconAnimStyle; mehendi: HomeIconAnimStyle;
+  electrician: HomeIconAnimStyle; celebration: HomeIconAnimStyle; offers: HomeIconAnimStyle;
+};
+
 export type AppConfig = {
   emergency: { bookingsDisabled: boolean; paymentsFreezed: boolean; emergencyLockdown: boolean };
   referral: { isEnabled: boolean; referrerRewardAmount: number; newUserDiscountAmount: number };
@@ -31,7 +40,20 @@ export type AppConfig = {
   homeTheme: HomeTheme;
   socialLinks: SocialLinks;
   defaultBannerEnabled: boolean;
+  homeIconAnimationEnabled: boolean;
+  homeIconAnimation: HomeIconAnimation;
 };
+
+const DEFAULT_ICON_ANIMATION: HomeIconAnimation = {
+  acRepair: "bob", plumbing: "bob", mehendi: "bob",
+  electrician: "bob", celebration: "bob", offers: "bob",
+};
+
+/** Legacy booleans (old on/off config) and unknown values map to bob/none. */
+function iconAnimStyle(v: unknown): HomeIconAnimStyle {
+  if (v === false) return "none";
+  return v === "none" || v === "bob" || v === "bounce" || v === "tada" ? v : "bob";
+}
 
 const DEFAULT_THEME: HomeTheme = {
   isActive: false,
@@ -63,6 +85,8 @@ const DEFAULT: AppConfig = {
   homeTheme: DEFAULT_THEME,
   socialLinks: DEFAULT_SOCIAL_LINKS,
   defaultBannerEnabled: true,
+  homeIconAnimationEnabled: true,
+  homeIconAnimation: DEFAULT_ICON_ANIMATION,
 };
 
 function hexToRgbVars(hex: string): string {
@@ -117,50 +141,104 @@ function applyThemeIfNeeded(c: AppConfig) {
   else resetTheme();
 }
 
+function parseConfig(data: any): AppConfig {
+  return {
+    emergency: data?.emergency ?? DEFAULT.emergency,
+    referral:  data?.referral  ?? DEFAULT.referral,
+    pricing:   data?.pricing   ?? DEFAULT.pricing,
+    homeTheme: { ...DEFAULT_THEME, ...(data?.homeTheme ?? {}) },
+    socialLinks: { ...DEFAULT_SOCIAL_LINKS, ...(data?.socialLinks ?? {}) },
+    defaultBannerEnabled: data?.defaultBannerEnabled !== false,
+    homeIconAnimationEnabled: data?.homeIconAnimationEnabled !== false,
+    homeIconAnimation: {
+      acRepair:    iconAnimStyle(data?.homeIconAnimation?.acRepair),
+      plumbing:    iconAnimStyle(data?.homeIconAnimation?.plumbing),
+      mehendi:     iconAnimStyle(data?.homeIconAnimation?.mehendi),
+      electrician: iconAnimStyle(data?.homeIconAnimation?.electrician),
+      celebration: iconAnimStyle(data?.homeIconAnimation?.celebration),
+      offers:      iconAnimStyle(data?.homeIconAnimation?.offers),
+    },
+  };
+}
+
+// ─── One shared poller for the whole app ──────────────────────────────────────
+// The request, the interval and the visibilitychange listener live at module
+// scope, shared by every subscriber, rather than one set per hook call. They
+// used to be per-call, and CategoryIcon calls this hook — the home page renders
+// one icon per category, so a single tab fired ~10 identical /api/app-config
+// requests on load, another ~10 every 60s, and another ~10 on every refocus.
+// The module-level `cached` only ever deduplicated the first *render*, not the
+// fetches. Refcounted: the timer starts with the first subscriber and stops
+// when the last one unmounts.
+const subscribers = new Set<(c: AppConfig) => void>();
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let inFlight = false;
+
+function fetchConfig() {
+  // Collapses the burst of mount-time calls (one per subscriber) into one request.
+  if (inFlight) return;
+  inFlight = true;
+  client
+    .get("/api/app-config")
+    .then((res) => {
+      const c = parseConfig(res.data);
+      cached = c;
+      applyThemeIfNeeded(c);
+      subscribers.forEach((notify) => notify(c));
+    })
+    .catch(() => {
+      // Network hiccup — keep showing whatever we already have (cached or
+      // DEFAULT). The next poll or visibility change tries again.
+    })
+    .finally(() => {
+      inFlight = false;
+    });
+}
+
+// Re-check when the tab regains focus — covers the common case of a customer
+// leaving the booking tab open in the background during a maintenance window.
+function onVisibilityChange() {
+  if (document.visibilityState === "visible") fetchConfig();
+}
+
+function startPolling() {
+  if (pollTimer) return;
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  // Also poll periodically for tabs that just stay open and focused.
+  pollTimer = setInterval(() => {
+    if (document.visibilityState === "visible") fetchConfig();
+  }, POLL_INTERVAL_MS);
+}
+
+function stopPolling() {
+  if (!pollTimer) return;
+  clearInterval(pollTimer);
+  pollTimer = null;
+  document.removeEventListener("visibilitychange", onVisibilityChange);
+}
+
 export function useAppConfig() {
   const [config, setConfig] = useState<AppConfig>(cached ?? DEFAULT);
 
   useEffect(() => {
-    // Render cached data instantly (no flash) while a fresh copy loads.
-    if (cached) applyThemeIfNeeded(cached);
+    subscribers.add(setConfig);
+    startPolling();
 
-    const fetchConfig = () => {
-      client.get("/api/app-config").then((res) => {
-        const c: AppConfig = {
-          emergency: res.data?.emergency ?? DEFAULT.emergency,
-          referral:  res.data?.referral  ?? DEFAULT.referral,
-          pricing:   res.data?.pricing   ?? DEFAULT.pricing,
-          homeTheme: { ...DEFAULT_THEME, ...(res.data?.homeTheme ?? {}) },
-          socialLinks: { ...DEFAULT_SOCIAL_LINKS, ...(res.data?.socialLinks ?? {}) },
-          defaultBannerEnabled: res.data?.defaultBannerEnabled !== false,
-        };
-        cached = c;
-        setConfig(c);
-        applyThemeIfNeeded(c);
-      }).catch(() => {
-        // Network hiccup — keep showing whatever we already have (cached or
-        // DEFAULT). The next poll or visibility change tries again.
-      });
-    };
+    // Render cached data instantly (no flash) while a fresh copy loads. A
+    // component mounting later (a modal, say) also adopts whatever the shared
+    // poller has already fetched, instead of starting from DEFAULT.
+    if (cached) {
+      setConfig(cached);
+      applyThemeIfNeeded(cached);
+    }
 
+    // Fetch on mount so opening the booking modal picks up an emergency flag
+    // flipped since the last poll. Deduped by `inFlight` when several mount together.
     fetchConfig();
 
-    // Re-check when the tab regains focus — covers the common case of a
-    // customer leaving the booking tab open in the background during a
-    // maintenance window.
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") fetchConfig();
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-
-    // Also poll periodically for tabs that just stay open and focused.
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") fetchConfig();
-    }, POLL_INTERVAL_MS);
-
     return () => {
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      clearInterval(interval);
+      subscribers.delete(setConfig);
+      if (subscribers.size === 0) stopPolling();
     };
   }, []);
 

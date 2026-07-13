@@ -1,6 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import client from "../api/client";
+
+// Mirrors the API's own default page size (controllers/booking.controller.js
+// caps `limit` at 50).
+const PAGE_SIZE = 20;
 
 type BookingService = {
   serviceId: string;
@@ -75,7 +79,13 @@ const STATUS_MAP: Record<string, StatusCfg> = {
   NEEDS_RESCHEDULING:   { bg: "bg-blue-50",   text: "text-blue-700",   dot: "bg-blue-400",   label: "⚠️ Reschedule Required" },
 };
 
-const NON_CANCELLABLE = new Set(["IN_PROGRESS", "COMPLETED", "CANCELLED"]);
+// NEEDS_RESCHEDULING is deliberately excluded from the generic cancel action
+// here — it has its own dedicated reschedule-or-cancel-for-full-refund flow on
+// the booking status page (with an explicit "company's fault" explanation),
+// and duplicating that logic here previously meant this page's generic
+// time-based cancel copy was shown for it instead, matching BookingStatusPage's
+// own `isCancellable` exclusion.
+const NON_CANCELLABLE = new Set(["IN_PROGRESS", "COMPLETED", "CANCELLED", "NEEDS_RESCHEDULING"]);
 
 function getStatusCfg(status: string): StatusCfg {
   return STATUS_MAP[status] ?? { bg: "bg-gray-50", text: "text-gray-600", dot: "bg-gray-400", label: status };
@@ -169,6 +179,7 @@ function BookingDetail({
                           src={s.options.referencePhotoUrl}
                           alt="Reference"
                           className="w-14 h-14 object-cover rounded-md border border-amber-200"
+                          loading="lazy"
                         />
                       </div>
                     )}
@@ -251,6 +262,16 @@ function BookingDetail({
         </div>
       )}
 
+      {/* Reschedule required — points at the dedicated flow instead of
+          duplicating its date/time picker and refund copy here. */}
+      {b.status === "NEEDS_RESCHEDULING" && (
+        <div className="border-t border-border pt-3">
+          <Link to={`/bookings/${b._id}`} className="text-xs text-primary font-medium hover:underline">
+            Pick a new time, or cancel for a full refund →
+          </Link>
+        </div>
+      )}
+
       {/* Cancel section */}
       {canCancel && (
         <div className="border-t border-border pt-3">
@@ -268,6 +289,13 @@ function BookingDetail({
               <p className="text-sm font-semibold text-red-700">Cancel this booking?</p>
               <p className="text-xs text-red-600">
                 {(() => {
+                  // The professional has already reached the location — cancelling
+                  // forfeits the fee regardless of the clock. Must be checked before
+                  // the generic time-based copy below, which would otherwise promise
+                  // a refund percentage that never gets paid out.
+                  if (b.status === "ARRIVED") {
+                    return "Your professional has already reached your location — no refund applies if you cancel now.";
+                  }
                   // Cake orders: refund is based on time since booking, not time to service.
                   const sinceTiers = b.sinceBookingTiersSnapshot;
                   if (b.cancellationPolicyTypeSnapshot === "SINCE_BOOKING" && sinceTiers?.length) {
@@ -334,21 +362,67 @@ function BookingDetail({
 /* ── Main Page ── */
 export default function MyBookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
+  // What the API says the customer actually has, which is not the same as what
+  // we've loaded. null = an older API that doesn't report it.
+  const [total, setTotal] = useState<number | null>(null);
+  const [page, setPage] = useState(0);
+  const [lastPageCount, setLastPageCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [cancelStates, setCancelStates] = useState<Record<string, CancelState>>({});
 
+  // /api/booking/my is paginated (20 per page) and reports `total`. Fetching it
+  // once with no params silently truncated the list at the first page, and the
+  // header then billed that page's length as the customer's lifetime total — so
+  // someone with 25 bookings saw 20 and was told "20 bookings total".
+  const loadPage = useCallback(async (next: number) => {
+    const res = await client.get(`/api/booking/my?page=${next}&limit=${PAGE_SIZE}`);
+    const raw = res.data?.bookings ?? res.data ?? [];
+    const rows: Booking[] = Array.isArray(raw) ? raw : [];
+
+    setBookings((prev) => {
+      // A booking created while the customer is paging shifts every later row
+      // down one slot in the createdAt sort, which re-serves a row we already
+      // hold. De-dupe rather than render it twice under the same key.
+      const seen = new Set(prev.map((b) => b._id));
+      return [...prev, ...rows.filter((b) => !seen.has(b._id))];
+    });
+
+    const reported = Number(res.data?.total);
+    setTotal(Number.isFinite(reported) && reported >= 0 ? reported : null);
+    setLastPageCount(rows.length);
+    setPage(next);
+  }, []);
+
   useEffect(() => {
-    client
-      .get("/api/booking/my")
-      .then((res) => {
-        const raw = res.data?.bookings ?? res.data ?? [];
-        setBookings(Array.isArray(raw) ? raw : []);
-      })
+    loadPage(1)
       .catch(() => setError("Could not load bookings."))
       .finally(() => setLoading(false));
-  }, []);
+  }, [loadPage]);
+
+  const handleLoadMore = async () => {
+    setLoadingMore(true);
+    setError("");
+    try {
+      await loadPage(page + 1);
+    } catch {
+      // Keep the rows already on screen — only the extra page failed.
+      setError("Could not load more bookings. Please try again.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // An empty page always ends it. Without that floor, a booking created between
+  // two page fetches shifts the window, the de-dupe above drops the row we'd
+  // already loaded, and `bookings.length < total` stays true forever — leaving a
+  // "Load older" button that fetches nothing. Otherwise trust `total`, falling
+  // back to "the last page came back full" when the API doesn't report one.
+  const hasMore =
+    lastPageCount > 0 &&
+    (total !== null ? bookings.length < total : lastPageCount === PAGE_SIZE);
 
   function toggleExpand(id: string) {
     setExpanded((prev) => {
@@ -396,7 +470,14 @@ export default function MyBookingsPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-ink">My Bookings</h1>
         <p className="text-muted text-sm mt-1">
-          {bookings.length} booking{bookings.length !== 1 ? "s" : ""} total
+          {(() => {
+            const count = total ?? bookings.length;
+            const suffix = `booking${count !== 1 ? "s" : ""} total`;
+            // Say what's on screen too, once it's only part of the whole.
+            return bookings.length < count
+              ? `Showing ${bookings.length} of ${count} ${suffix}`
+              : `${count} ${suffix}`;
+          })()}
         </p>
       </div>
 
@@ -475,6 +556,16 @@ export default function MyBookingsPage() {
               </div>
             );
           })}
+
+          {hasMore && (
+            <button
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+              className="w-full card p-4 text-sm font-semibold text-primary hover:border-primary transition disabled:opacity-50"
+            >
+              {loadingMore ? "Loading…" : "Load older bookings"}
+            </button>
+          )}
         </div>
       )}
     </div>

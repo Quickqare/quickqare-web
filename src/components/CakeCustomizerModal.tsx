@@ -104,12 +104,19 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
     });
   };
 
+  // webMedia360 is the web-specific gallery admins upload separately from the
+  // app's media360 (see CategoryPage's card gallery, which never shows
+  // media360) — this modal was preferring the app's photos over the web ones
+  // even when a web gallery existed, so an admin's web-specific uploads never
+  // appeared here. media360 is only a fallback for cakes with no web gallery.
   const galleryPhotos =
-    cake.media360 && cake.media360.length > 0
-      ? cake.media360
-      : cake.webImageUrl || cake.imageUrl
-        ? [cake.webImageUrl || cake.imageUrl!]
-        : [];
+    cake.webMedia360 && cake.webMedia360.length > 0
+      ? cake.webMedia360
+      : cake.media360 && cake.media360.length > 0
+        ? cake.media360
+        : cake.webImageUrl || cake.imageUrl
+          ? [cake.webImageUrl || cake.imageUrl!]
+          : [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" onClick={onClose}>

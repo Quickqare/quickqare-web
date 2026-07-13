@@ -23,17 +23,27 @@ export function getSavedLocation(): SavedLocation | null {
   } catch { return null; }
 }
 
+// Fired whenever persistLocation writes a new location, so live consumers
+// (the service catalog, most importantly) can refetch with the new pincode /
+// coords instead of serving results computed for the old location. The label
+// and the full record are ALWAYS written together here — a label-only setter
+// used to exist and let the header show one city while every booking flow kept
+// using another.
+const LOCATION_CHANGED_EVENT = "qq:location-changed";
+
 export function persistLocation(loc: SavedLocation) {
   localStorage.setItem(LOC_FULL_KEY, JSON.stringify(loc));
   localStorage.setItem(LOC_LABEL_KEY, loc.label);
+  window.dispatchEvent(new Event(LOCATION_CHANGED_EVENT));
+}
+
+export function onLocationChanged(handler: () => void): () => void {
+  window.addEventListener(LOCATION_CHANGED_EVENT, handler);
+  return () => window.removeEventListener(LOCATION_CHANGED_EVENT, handler);
 }
 
 export function getSavedLocationLabel(): string {
   return localStorage.getItem(LOC_LABEL_KEY) || "";
-}
-
-export function setSavedLocationLabel(label: string) {
-  localStorage.setItem(LOC_LABEL_KEY, label);
 }
 
 export async function geocodePosition(latitude: number, longitude: number): Promise<SavedLocation | null> {

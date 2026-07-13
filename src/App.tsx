@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "./contexts/AuthContext";
 import Navbar from "./components/Navbar";
+import Footer from "./components/Footer";
 import HomePage from "./pages/HomePage";
 import MyBookingsPage from "./pages/MyBookingsPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -64,6 +65,10 @@ function AppInner() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
+
+      {/* Rendered once here (not per-page) so every route gets a footer —
+          previously it lived only inline inside HomePage. */}
+      <Footer />
 
       {showLogin && <LoginModal onClose={() => { setShowLogin(false); checkPendingRating(); }} />}
 

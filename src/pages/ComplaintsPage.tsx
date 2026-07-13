@@ -12,13 +12,16 @@ const ISSUE_TYPES = [
   "Other",
 ];
 
+// Field names here match the backend's actual contract (controllers/complaint.controller.js):
+// the complaint document keys the booking as `orderId`, not `bookingId`, and its id is
+// `id`, not `_id` (the response hand-shapes the Mongoose doc rather than returning it raw).
 type Complaint = {
-  _id: string;
+  id: string;
   issueType: string;
   description: string;
   status: string;
   createdAt: string;
-  bookingId?: string | { _id: string; serviceCategory?: string };
+  orderId?: string | { _id: string; serviceCategory?: string };
 };
 
 const STATUS_STYLE: Record<string, string> = {
@@ -51,7 +54,10 @@ export default function ComplaintsPage() {
   useEffect(() => {
     client.get("/api/complaints")
       .then((res) => {
-        const raw = res.data?.complaints ?? res.data ?? [];
+        // getUserComplaints nests the array under data.complaints, not top-level —
+        // reading res.data?.complaints always missed it and silently showed "no
+        // complaints yet" regardless of what the customer had actually filed.
+        const raw = res.data?.data?.complaints ?? [];
         setComplaints(Array.isArray(raw) ? raw : []);
       })
       .catch(() => {})
@@ -59,6 +65,10 @@ export default function ComplaintsPage() {
   }, []);
 
   const handleSubmit = async () => {
+    // The backend requires a real booking to attach the complaint to (it looks
+    // up `orderId` against the user's own bookings and rejects if missing) —
+    // this was never optional despite the form previously treating it that way.
+    if (!bookingId.trim()) { setFormError("Please enter the booking ID this complaint is about."); return; }
     if (!description.trim()) { setFormError("Please describe the issue."); return; }
     setFormError("");
     setSubmitting(true);
@@ -66,9 +76,12 @@ export default function ComplaintsPage() {
       const res = await client.post("/api/complaints", {
         issueType,
         description: description.trim(),
-        bookingId: bookingId.trim() || undefined,
+        // The backend's field is `orderId`, not `bookingId` — sending the wrong
+        // key meant the required-field check on the server always failed and
+        // every complaint submission from web returned 400.
+        orderId: bookingId.trim(),
       });
-      const newComplaint = res.data?.complaint ?? res.data;
+      const newComplaint = res.data?.data?.complaint;
       if (newComplaint) setComplaints((prev) => [newComplaint, ...prev]);
       setSubmitted(true);
       setDescription("");
@@ -115,7 +128,7 @@ export default function ComplaintsPage() {
         ) : (
           <div className="space-y-4">
             {complaints.map((c) => (
-              <div key={c._id} className="card p-4">
+              <div key={c.id} className="card p-4">
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <p className="font-semibold text-ink text-sm">{c.issueType}</p>
                   <span className={`text-xs font-bold px-2.5 py-1 rounded-full capitalize ${STATUS_STYLE[c.status] ?? "bg-gray-100 text-gray-600"}`}>
@@ -144,15 +157,22 @@ export default function ComplaintsPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-ink mb-1.5">
-                Booking ID <span className="text-muted font-normal">(optional)</span>
-              </label>
+              <label className="block text-sm font-medium text-ink mb-1.5">Booking ID</label>
               <input
                 className="input"
-                placeholder="Last 8 characters of booking ID"
+                placeholder="Paste the full booking ID"
                 value={bookingId}
                 onChange={(e) => setBookingId(e.target.value)}
               />
+              {/* The backend looks this up as a full Mongo ObjectId against the
+                  user's own bookings — the truncated 8-char ID shown elsewhere
+                  in the app (e.g. My Bookings' "Booking ID: XXXXXXXX") would
+                  never match, so this must be the complete ID. The reliable way
+                  to get it is via "Raise a Complaint" from a booking's status
+                  page, which fills this in automatically. */}
+              <p className="text-xs text-muted mt-1">
+                Required. Easiest way: open the booking in "My Bookings" → "Live status" → "Raise a Complaint".
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-ink mb-1.5">Description *</label>

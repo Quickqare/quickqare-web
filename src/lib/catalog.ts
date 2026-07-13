@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import client from "../api/client";
-import { getSavedLocation } from "./location";
+import { getSavedLocation, onLocationChanged } from "./location";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type CategoryObj = { _id: string; name: string; slug?: string; imageUrl?: string; webImageUrl?: string };
@@ -36,10 +36,13 @@ export type Service = {
   media360?: string[];
   // Web-only photo gallery (admin uploads separately from the app's media360).
   webMedia360?: string[];
-  // Admin toggle: false = gallery photos don't auto-rotate (app + web).
+  // Admin toggle: false = app gallery photos don't auto-rotate (app only).
   autoSlideEnabled?: boolean;
-  // Seconds each photo stays before sliding to the next (default 3).
+  // Seconds each photo stays before sliding to the next, app only (default 3).
   autoSlideSeconds?: number;
+  // Same as above, but for the web card carousel — controlled independently.
+  webAutoSlideEnabled?: boolean;
+  webAutoSlideSeconds?: number;
   minLeadDays?: number;
   isEggless?: boolean;
   cancellationPolicyType?: "BEFORE_SERVICE" | "SINCE_BOOKING";
@@ -97,12 +100,18 @@ export const OPTIONS_SUFFIX = " options";
 export const isVariantService = (svc: Service): boolean =>
   subCatName(svc.subCategory).trim().toLowerCase().endsWith(OPTIONS_SUFFIX);
 
+// Service names are free text typed by an admin, so any character can show up in
+// one. Interpolating that straight into a RegExp turns a name like "AC Repair +"
+// into the pattern /\s*+\s*$/ — a SyntaxError that crashes the whole category
+// render — while "(Split)" would silently strip the wrong text.
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // Short label for a variant inside its base's picker: "Split AC installation"
 // under base "AC installation" → "Split AC". Repair issues keep their own name.
 export const variantShortLabel = (variantName: string, baseName: string): string => {
   const lastWord = (baseName.trim().split(/\s+/).pop() || "").toLowerCase();
   if (!lastWord) return variantName;
-  const short = variantName.replace(new RegExp(`\\s*${lastWord}\\s*$`, "i"), "").trim();
+  const short = variantName.replace(new RegExp(`\\s*${escapeRegExp(lastWord)}\\s*$`, "i"), "").trim();
   return short || variantName;
 };
 
@@ -125,28 +134,39 @@ export function groupIntoCategories(services: Service[]): GroupedCategory[] {
   return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// Fetches the service catalog once and groups it by category. Shared by the
-// home landing (category cards) and each category page.
+// Fetches the service catalog and groups it by category. Shared by the home
+// landing (category cards) and each category page. Refetches whenever the
+// saved location changes (first-run prompt, header picker) so location-scoped
+// fields like `availableNearby` are computed for where the customer actually
+// is — the catalog used to be fetched exactly once per mount, which both
+// missed the first-run prompt resolving and ignored later location changes.
 export function useServices() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    const loc = getSavedLocation();
-    const params = new URLSearchParams();
-    if (loc?.pincode) params.set("pincode", loc.pincode);
-    if (loc?.latitude) params.set("lat", String(loc.latitude));
-    if (loc?.longitude) params.set("lng", String(loc.longitude));
-    const qs = params.toString();
-    client.get(`/api/services${qs ? `?${qs}` : ""}`)
-      .then((res) => {
-        const raw = res.data;
-        const list: Service[] = Array.isArray(raw) ? raw
-          : Array.isArray(raw?.services) ? raw.services
-          : Array.isArray(raw?.data) ? raw.data : [];
-        setServices(list);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const fetchServices = () => {
+      const loc = getSavedLocation();
+      const params = new URLSearchParams();
+      if (loc?.pincode) params.set("pincode", loc.pincode);
+      if (loc?.latitude) params.set("lat", String(loc.latitude));
+      if (loc?.longitude) params.set("lng", String(loc.longitude));
+      const qs = params.toString();
+      client.get(`/api/services${qs ? `?${qs}` : ""}`)
+        .then((res) => {
+          if (cancelled) return;
+          const raw = res.data;
+          const list: Service[] = Array.isArray(raw) ? raw
+            : Array.isArray(raw?.services) ? raw.services
+            : Array.isArray(raw?.data) ? raw.data : [];
+          setServices(list);
+        })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) setLoading(false); });
+    };
+    fetchServices();
+    const unsubscribe = onLocationChanged(fetchServices);
+    return () => { cancelled = true; unsubscribe(); };
   }, []);
   const categories = useMemo(() => groupIntoCategories(services), [services]);
   return { services, categories, loading };

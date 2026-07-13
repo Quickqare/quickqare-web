@@ -69,7 +69,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (res.data?.success) {
         const u = res.data.user;
         setUser(u);
-        const isNewUser = res.data?.isNewUser === true || u?.name === "User" || !u?.gender;
+        // `isNewUser` is authoritative — the API tells us whether this login just
+        // created the account. The name check additionally re-prompts someone who
+        // abandoned the details step last time (their name is still the "User"
+        // placeholder). Gender is deliberately NOT part of this: it's optional
+        // (ProfilePage offers "Prefer not to say"), so testing it here dragged
+        // those users through "complete your profile" on every single login.
+        const isNewUser = res.data?.isNewUser === true || u?.name === "User";
         return { success: true, message: "", isNewUser };
       }
       return { success: false, message: res.data?.message ?? "Verification failed" };

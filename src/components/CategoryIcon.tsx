@@ -73,17 +73,26 @@ export function getCatIcon(slug: string): React.FC<{ size?: number; color?: stri
   return AcIcon;
 }
 
+// Maps a category slug to its key in the admin config (categoryIcons /
+// homeIconAnimation). null = category with no dedicated admin entry.
+export function catConfigKey(
+  slug: string
+): "acRepair" | "plumbing" | "mehendi" | "electrician" | "celebration" | null {
+  const k = slug.toLowerCase();
+  if (k.includes("celebrat") || k.includes("cake")) return "celebration";
+  if (k.includes("ac")) return "acRepair";
+  if (k.includes("plumb")) return "plumbing";
+  if (k.includes("mehend") || k.includes("mehndi")) return "mehendi";
+  if (k.includes("electric")) return "electrician";
+  return null;
+}
+
 // Renders the admin-uploaded category icon when set, else the built-in SVG.
 export function CategoryIcon({ slug, size, color }: { slug: string; size: number; color: string }) {
   const { homeTheme } = useAppConfig();
-  const k = slug.toLowerCase();
   const ci = homeTheme.categoryIcons;
-  let url = "";
-  if (k.includes("celebrat") || k.includes("cake")) url = ci.celebration ?? "";
-  else if (k.includes("ac")) url = ci.acRepair ?? "";
-  else if (k.includes("plumb")) url = ci.plumbing ?? "";
-  else if (k.includes("mehend") || k.includes("mehndi")) url = ci.mehendi ?? "";
-  else if (k.includes("electric")) url = ci.electrician ?? "";
+  const key = catConfigKey(slug);
+  const url = key ? (ci[key] ?? "") : "";
 
   if (url) return <img src={url} alt="" style={{ width: size, height: size, objectFit: "contain" }} />;
   const Icon = getCatIcon(slug);

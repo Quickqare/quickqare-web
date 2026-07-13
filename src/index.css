@@ -31,8 +31,34 @@
   30%       { transform: translateY(-4px); }
   60%       { transform: translateY(-2px); }
 }
-.animate-float    { animation: float    2.8s ease-in-out infinite; }
-.animate-icon-bob { animation: icon-bob 0.55s ease-out; }
+/* Home icon loops — bounce and tada keep a rest phase inside the cycle so
+   the motion fires periodically rather than thrashing non-stop. */
+@keyframes qq-icon-bounce {
+  0%, 34%, 100% { transform: translateY(0); }
+  8%            { transform: translateY(-12px); }
+  17%           { transform: translateY(0); }
+  23%           { transform: translateY(-5px); }
+  28%           { transform: translateY(0); }
+  31%           { transform: translateY(-2px); }
+}
+@keyframes qq-icon-tada {
+  0%, 30%, 100% { transform: scale(1) rotate(0deg); }
+  3%, 6%        { transform: scale(0.93) rotate(-3deg); }
+  9%            { transform: scale(1.07) rotate(3deg); }
+  12%           { transform: scale(1.07) rotate(-3deg); }
+  15%           { transform: scale(1.07) rotate(3deg); }
+  18%           { transform: scale(1.07) rotate(-3deg); }
+  21%           { transform: scale(1.07) rotate(3deg); }
+  24%           { transform: scale(1.07) rotate(-3deg); }
+  27%           { transform: scale(1.02) rotate(2deg); }
+}
+.animate-float       { animation: float         2.8s ease-in-out infinite; }
+.animate-icon-bob    { animation: icon-bob      0.55s ease-out; }
+.animate-icon-bounce { animation: qq-icon-bounce 3s   ease-in-out infinite; }
+.animate-icon-tada   { animation: qq-icon-tada   3.5s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-float, .animate-icon-bounce, .animate-icon-tada { animation: none; }
+}
 
 /* Default promo banner — progress bar fill + staggered content rise */
 @keyframes qq-banner-fill { from { width: 0; } to { width: 100%; } }

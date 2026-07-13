@@ -28,6 +28,12 @@ async function postWidget(endpoint: string, body: Record<string, unknown>) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH, ...body }),
   });
+  // MSG91 returns 200 with a { type: "error", ... } body for business-logic
+  // failures (wrong OTP, etc.) — isError() below handles that. A non-2xx here
+  // means the HTTP call itself failed (rate limit, 5xx, bad request), which
+  // previously fell straight into res.json() and surfaced as an opaque
+  // "Unexpected token" parse error instead of a clear message.
+  if (!res.ok) throw new Error(`Request failed (${res.status}). Please try again.`);
   return res.json();
 }
 
@@ -82,7 +88,15 @@ export async function sendWebOtp(phone: string): Promise<void> {
 }
 
 export async function resendWebOtp(phone: string): Promise<void> {
-  const result = await postWidget("/retryOtp", lastReqId ? { reqId: lastReqId } : {});
+  // No reqId to resend against — e.g. the initial sendOtpMobile response
+  // failed to parse (extractReqId came back null). retryOtp has nothing to
+  // key off in that case and would just fail, leaving resend permanently
+  // broken until the customer closes the modal and starts over. Send a fresh
+  // OTP instead, using the phone number this function was actually given.
+  if (!lastReqId) {
+    return sendWebOtp(phone);
+  }
+  const result = await postWidget("/retryOtp", { reqId: lastReqId });
   if (isError(result)) throw new Error(result?.message || "Failed to resend OTP.");
   const fresh = extractReqId(result);
   if (fresh) lastReqId = fresh;

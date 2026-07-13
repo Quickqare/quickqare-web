@@ -52,7 +52,7 @@ export default function CakeGallery({ photos, className = "" }: { photos: string
                 i === activeIndex ? "border-primary" : "border-transparent opacity-70 hover:opacity-100"
               }`}
             >
-              <img src={src} alt="" className="w-full h-full object-cover" />
+              <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" />
             </button>
           ))}
         </div>

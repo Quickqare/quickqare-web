@@ -123,13 +123,18 @@ export default function LoginModal({ onClose }: Props) {
         {/* OTP step */}
         {step === "otp" && (
           <div className="space-y-4">
+            {/* type="text" + inputMode, not type="number": maxLength is ignored on
+                numeric inputs (so the 6-digit cap never applied) and they also
+                accept "e", "+", "-" and ".". Clamping in onChange enforces both. */}
             <input
               className="input text-center text-2xl tracking-widest font-bold"
-              type="number"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
               placeholder="• • • •"
               value={otp}
               maxLength={6}
-              onChange={(e) => setOtp(e.target.value)}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
               onKeyDown={(e) => e.key === "Enter" && handleVerify()}
               autoFocus
             />

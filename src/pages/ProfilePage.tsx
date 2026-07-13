@@ -4,6 +4,14 @@ import { useAuth } from "../contexts/AuthContext";
 import client from "../api/client";
 import { useAppConfig } from "../hooks/useAppConfig";
 
+const GENDERS = ["Male", "Female", "Other"];
+
+// Accounts created before the casing was unified stored "male"/"female"/"other".
+// Map them onto the canonical option values so the dropdown shows the user's real
+// gender instead of falling back to blank ("Prefer not to say").
+const normalizeGender = (raw?: string): string =>
+  GENDERS.find((g) => g.toLowerCase() === String(raw ?? "").trim().toLowerCase()) ?? "";
+
 export default function ProfilePage() {
   const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
@@ -11,7 +19,7 @@ export default function ProfilePage() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
-  const [gender, setGender] = useState(user?.gender ?? "");
+  const [gender, setGender] = useState(normalizeGender(user?.gender));
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
@@ -44,7 +52,7 @@ export default function ProfilePage() {
   const handleCancel = () => {
     setName(user.name ?? "");
     setEmail(user.email ?? "");
-    setGender(user.gender ?? "");
+    setGender(normalizeGender(user.gender));
     setEditing(false);
     setError("");
   };
@@ -98,11 +106,15 @@ export default function ProfilePage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-ink mb-1.5">Gender</label>
+              {/* Capitalised on purpose — LoginModal and both mobile screens all
+                  write "Male"/"Female"/"Other". Storing lowercase here meant the
+                  same field held two casings, and an account created anywhere else
+                  showed up blank in this dropdown. */}
               <select className="input" value={gender} onChange={(e) => setGender(e.target.value)}>
                 <option value="">Prefer not to say</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="other">Other</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
               </select>
             </div>
             {error && <p className="text-red-500 text-sm">{error}</p>}

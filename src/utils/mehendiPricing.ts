@@ -3,6 +3,11 @@ const normalize = (v: string) =>
 
 const FEET_NAMES = new Set(["feet", "basic feet", "ankle", "above ankle", "mid leg", "below knee"]);
 
+// Feet add-ons that the backend refuses to book on their own (booking.controller.js
+// `mehendiRestrictedFeetOnly`) — they require a hand design in the same booking.
+// Mid Leg / Below Knee are NOT in this set: those can be booked standalone.
+const RESTRICTED_FEET_ONLY_NAMES = new Set(["feet", "basic feet", "ankle", "above ankle"]);
+
 export const getMehendiPricingKey = (name?: string | null): string | null => {
   const n = normalize(name || "");
   if (n.includes("minimal mehendi"))              return "minimal";
@@ -36,6 +41,12 @@ export const isMehendiHandOption = (name?: string | null): boolean => {
 
 export const isMehendiAddon = (name?: string | null): boolean =>
   FEET_NAMES.has(normalize(name || ""));
+
+// Basic Feet / Ankle / Above Ankle — bookable only alongside a hand design in
+// the same cart (mirrors the mobile app's guard on adding these to the cart,
+// and the backend's hard rejection at booking-create time if they arrive alone).
+export const isRestrictedMehendiFeetOnly = (name?: string | null): boolean =>
+  RESTRICTED_FEET_ONLY_NAMES.has(normalize(name || ""));
 
 export const isBridalMehendi = (name?: string | null): boolean =>
   normalize(name || "").includes("bridal mehendi");
