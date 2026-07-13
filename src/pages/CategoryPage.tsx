@@ -393,10 +393,9 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                         ) : (
                           <button
                             onClick={() => handleBookClick(svc)}
-                            disabled={unavailable}
                             className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            {unavailable ? "Unavailable" : variants.length > 0 ? "Choose" : "Book"}
+                            {unavailable ? "View" : variants.length > 0 ? "Choose" : "Book"}
                           </button>
                         )}
                       </div>

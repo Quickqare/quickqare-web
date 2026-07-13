@@ -80,7 +80,15 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
     }
   };
 
+  // Browsable, but not orderable. createBooking only gates on hub/zone coverage,
+  // not on baker supply — so an order for a cake nobody bakes would be created and
+  // PAID FOR, then fail to assign and land in escalation/refund. Block it here
+  // rather than take money for an order we can't fulfil.
+  const unavailable = cake.availableNearby === false;
+
   const handleContinue = () => {
+    if (unavailable) return;
+
     const options: CakeOptions = {
       flavour,
       ...(weight ? { weight } : {}),
@@ -140,6 +148,17 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
         </div>
 
         <div className="p-5 space-y-5">
+          {unavailable && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+              <p className="text-sm font-bold text-red-700">Not available in your area</p>
+              <p className="text-xs text-red-800 leading-relaxed mt-1">
+                No baker near you is offering this cake yet, so it can&apos;t be ordered right now.
+                Have a look through the flavours and options — we&apos;ll open it up as soon as a
+                baker covers your area.
+              </p>
+            </div>
+          )}
+
           {/* Multi-angle photo gallery */}
           <CakeGallery photos={galleryPhotos} />
 
@@ -343,8 +362,12 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
               {addonNames.length ? ` · ${addonNames.length} add-on${addonNames.length > 1 ? "s" : ""}` : ""}
             </p>
           </div>
-          <button className="btn-primary px-6" onClick={handleContinue} disabled={!flavour}>
-            Continue to book
+          <button
+            className="btn-primary px-6 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={handleContinue}
+            disabled={!flavour || unavailable}
+          >
+            {unavailable ? "Unavailable in your area" : "Continue to book"}
           </button>
         </div>
       </div>
