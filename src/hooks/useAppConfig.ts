@@ -24,6 +24,8 @@ export type SocialLinks = {
   whatsapp: string; instagram: string; facebook: string; twitter: string; youtube: string;
 };
 
+export type ContactInfo = { email: string; phone: string };
+
 export type HomeIconAnimStyle = "none" | "bob" | "bounce" | "tada";
 
 /** Per-icon animation style — only consulted when homeIconAnimationEnabled
@@ -39,6 +41,7 @@ export type AppConfig = {
   pricing: { taxPercent: number; platformFeePercent: number; platformFeeFlatInr: number };
   homeTheme: HomeTheme;
   socialLinks: SocialLinks;
+  contactInfo: ContactInfo;
   defaultBannerEnabled: boolean;
   homeIconAnimationEnabled: boolean;
   homeIconAnimation: HomeIconAnimation;
@@ -78,12 +81,15 @@ const DEFAULT_SOCIAL_LINKS: SocialLinks = {
   whatsapp: "", instagram: "", facebook: "", twitter: "", youtube: "",
 };
 
+const DEFAULT_CONTACT_INFO: ContactInfo = { email: "", phone: "" };
+
 const DEFAULT: AppConfig = {
   emergency: { bookingsDisabled: false, paymentsFreezed: false, emergencyLockdown: false },
   referral: { isEnabled: true, referrerRewardAmount: 50, newUserDiscountAmount: 100 },
   pricing: { taxPercent: 18, platformFeePercent: 0, platformFeeFlatInr: 0 },
   homeTheme: DEFAULT_THEME,
   socialLinks: DEFAULT_SOCIAL_LINKS,
+  contactInfo: DEFAULT_CONTACT_INFO,
   defaultBannerEnabled: true,
   homeIconAnimationEnabled: true,
   homeIconAnimation: DEFAULT_ICON_ANIMATION,
@@ -148,6 +154,7 @@ function parseConfig(data: any): AppConfig {
     pricing:   data?.pricing   ?? DEFAULT.pricing,
     homeTheme: { ...DEFAULT_THEME, ...(data?.homeTheme ?? {}) },
     socialLinks: { ...DEFAULT_SOCIAL_LINKS, ...(data?.socialLinks ?? {}) },
+    contactInfo: { ...DEFAULT_CONTACT_INFO, ...(data?.contactInfo ?? {}) },
     defaultBannerEnabled: data?.defaultBannerEnabled !== false,
     homeIconAnimationEnabled: data?.homeIconAnimationEnabled !== false,
     homeIconAnimation: {

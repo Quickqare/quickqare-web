@@ -31,6 +31,7 @@ type Booking = {
   serviceCategory?: string;
   scheduledDate: string;
   scheduledTime: string;
+  scheduledStartAt?: string;
   estimatedDurationMinutes?: number;
   address?: string;
   houseDetails?: string;
@@ -50,9 +51,15 @@ type Booking = {
   refundStatus?: string;
   completedAt?: string;
   createdAt: string;
-  // Cake orders refund by time since booking, not time to service
+  // Refund-policy snapshot taken at booking creation — used to preview the
+  // refund % a cancel would land on (mirrors the backend's calculateRefund).
+  cancellationTiersSnapshot?: { minHoursBefore: number; refundPercent: number }[];
+  // Legacy cake orders refund by time since booking, not time to service
   cancellationPolicyTypeSnapshot?: "BEFORE_SERVICE" | "SINCE_BOOKING";
   sinceBookingTiersSnapshot?: { maxHoursAfterBooking: number; refundPercent: number }[];
+  // Grace-period free-cancel deadline (last-minute orders) — cancelling at or
+  // before this instant refunds 100% regardless of tier.
+  freeCancelUntil?: string | null;
 };
 
 type CancelState =
@@ -296,7 +303,14 @@ function BookingDetail({
                   if (b.status === "ARRIVED") {
                     return "Your professional has already reached your location — no refund applies if you cancel now.";
                   }
-                  // Cake orders: refund is based on time since booking, not time to service.
+                  // Grace window (backend freeCancelUntil): last-minute orders
+                  // get a short free-cancel window from booking regardless of
+                  // the tier they'd otherwise land in.
+                  if (b.freeCancelUntil && Date.now() <= new Date(b.freeCancelUntil).getTime()) {
+                    const until = new Date(b.freeCancelUntil);
+                    return `You're within your free-cancellation window (until ${until.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}) — you'll receive a 100% refund.`;
+                  }
+                  // Legacy cake orders: refund is based on time since booking, not time to service.
                   const sinceTiers = b.sinceBookingTiersSnapshot;
                   if (b.cancellationPolicyTypeSnapshot === "SINCE_BOOKING" && sinceTiers?.length) {
                     const first = sinceTiers[0];
@@ -306,7 +320,26 @@ function BookingDetail({
                       ? `You're within ${first.maxHoursAfterBooking}h of booking — you'll receive a ${first.refundPercent}% refund.`
                       : `More than ${first.maxHoursAfterBooking}h have passed since booking — only ${lastPercent}% will be refunded.`;
                   }
-                  return "Refund depends on how far in advance you cancel. More than 24h before → 100% refund.";
+                  // Preview the refund % this cancel lands on from the
+                  // booking's tier snapshot (same rule as the backend's
+                  // calculateRefund, including its default tiers).
+                  const tiers = b.cancellationTiersSnapshot?.length
+                    ? b.cancellationTiersSnapshot
+                    : [
+                        { minHoursBefore: 24, refundPercent: 100 },
+                        { minHoursBefore: 4, refundPercent: 75 },
+                        { minHoursBefore: 1, refundPercent: 50 },
+                        { minHoursBefore: 0, refundPercent: 25 },
+                      ];
+                  const startAt = b.scheduledStartAt ? new Date(b.scheduledStartAt).getTime() : NaN;
+                  if (Number.isFinite(startAt)) {
+                    const hoursToService = (startAt - Date.now()) / 36e5;
+                    const tier = [...tiers]
+                      .sort((x, y) => y.minHoursBefore - x.minHoursBefore)
+                      .find((t) => hoursToService >= t.minHoursBefore);
+                    if (tier) return `Cancelling now refunds ${tier.refundPercent}% of the amount paid.`;
+                  }
+                  return "Refund depends on how far in advance you cancel.";
                 })()}
               </p>
               <div className="flex gap-2">

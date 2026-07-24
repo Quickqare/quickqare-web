@@ -7,6 +7,8 @@ import HomePage from "./pages/HomePage";
 import MyBookingsPage from "./pages/MyBookingsPage";
 import ProfilePage from "./pages/ProfilePage";
 import PolicyPage from "./pages/PolicyPage";
+import ContactUsPage from "./pages/ContactUsPage";
+import RegisterProfessionalPage from "./pages/RegisterProfessionalPage";
 import BookingStatusPage from "./pages/BookingStatusPage";
 import ComplaintsPage from "./pages/ComplaintsPage";
 import ReferralPage from "./pages/ReferralPage";
@@ -62,6 +64,9 @@ function AppInner() {
           <Route path="/privacy-policy" element={<PolicyPage />} />
           <Route path="/terms" element={<PolicyPage />} />
           <Route path="/refund-policy" element={<PolicyPage />} />
+          <Route path="/anti-discrimination-policy" element={<PolicyPage />} />
+          <Route path="/contact-us" element={<ContactUsPage />} />
+          <Route path="/register-professional" element={<RegisterProfessionalPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

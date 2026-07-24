@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import client from "../api/client";
 import { Service } from "../lib/catalog";
 import { CakeOptions, CartItem } from "./BookingModal";
 import CakeGallery from "./CakeGallery";
+import { getCancellationPolicyLines, getLeadTimeLine } from "../utils/cancellationPolicyText";
 
 const MAX_NAME_ON_CAKE_LENGTH = 40;
 
@@ -28,12 +29,14 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
   const flavoursOn = customization.flavoursEnabled !== false;
   const weightsOn = customization.weightsEnabled !== false && (customization.weights?.length || 0) > 0;
   const tiersOn = customization.tiersEnabled !== false;
+  const egglessOn = customization.egglessOptionEnabled !== false;
   const addonsOn = customization.addonsEnabled !== false && customization.addons.length > 0;
   const refPhotoOn = customization.referencePhotoEnabled !== false;
 
   const [flavour, setFlavour] = useState(customization.flavours[0]?.name || "");
   const [weight, setWeight] = useState(weightsOn ? customization.weights?.[0]?.label || "" : "");
   const [tiers, setTiers] = useState<1 | 2>(1);
+  const [eggless, setEggless] = useState(false);
   const [addonNames, setAddonNames] = useState<string[]>([]);
   const [nameOnCake, setNameOnCake] = useState("");
   const [referencePhotoUrl, setReferencePhotoUrl] = useState("");
@@ -45,11 +48,12 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
     const flavourDelta = customization.flavours.find((f) => f.name === flavour)?.priceDelta || 0;
     const weightDelta = customization.weights?.find((w) => w.label === weight)?.priceDelta || 0;
     const tierDelta = tiers === 2 ? customization.twoTierPriceDelta || 0 : 0;
+    const egglessDelta = eggless && egglessOn ? customization.egglessPriceDelta || 0 : 0;
     const addonsTotal = customization.addons
       .filter((a) => addonNames.includes(a.name))
       .reduce((sum, a) => sum + (Number(a.price) || 0), 0);
-    return Math.round((Number(cake.price) || 0) + flavourDelta + weightDelta + tierDelta + addonsTotal);
-  }, [cake.price, customization, flavour, weight, tiers, addonNames]);
+    return Math.round((Number(cake.price) || 0) + flavourDelta + weightDelta + tierDelta + egglessDelta + addonsTotal);
+  }, [cake.price, customization, flavour, weight, tiers, eggless, egglessOn, addonNames]);
 
   const toggleAddon = (name: string) => {
     setAddonNames((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
@@ -93,6 +97,7 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
       flavour,
       ...(weight ? { weight } : {}),
       tiers,
+      eggless: egglessOn && eggless,
       addons: customization.addons
         .filter((a) => addonNames.includes(a.name))
         .map((a) => ({ name: a.name, price: Number(a.price) || 0 })),
@@ -109,6 +114,12 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
       category: "Celebration",
       options,
       minLeadDays: Math.max(Number(cake.minLeadDays) || 0, 1),
+      // Threaded through so BookingModal can render the REAL cancellation
+      // policy at checkout instead of a hardcoded guess.
+      cancellationPolicyType: cake.cancellationPolicyType,
+      sinceBookingTiers: cake.sinceBookingTiers,
+      cancellationTiers: cake.cancellationTiers,
+      cancellationGrace: cake.cancellationGrace,
     });
   };
 
@@ -262,6 +273,32 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
           </div>
           )}
 
+          {/* Egg preference — every cake can be made with or without egg */}
+          {egglessOn && (
+          <div>
+            <p className="text-sm font-bold text-ink mb-2">Egg preference</p>
+            <div className="grid grid-cols-2 gap-2.5">
+              {([false, true] as const).map((option) => (
+                <button
+                  key={String(option)}
+                  type="button"
+                  onClick={() => setEggless(option)}
+                  className={`border rounded-xl px-4 py-3 text-center transition ${
+                    eggless === option ? "border-primary bg-primary/5" : "border-border hover:border-gray-300"
+                  }`}
+                >
+                  <span className={`block text-sm font-bold ${eggless === option ? "text-primary" : "text-ink"}`}>
+                    {option ? "Eggless" : "With Egg"}
+                  </span>
+                  <span className="block text-xs text-muted mt-0.5">
+                    {option && Number(customization.egglessPriceDelta) > 0 ? `+₹${customization.egglessPriceDelta}` : "Included"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          )}
+
           {/* Add-ons */}
           {addonsOn && (
             <div>
@@ -342,13 +379,20 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
           </div>
           )}
 
-          {/* Cancellation policy — shown before ordering */}
+          {/* Cancellation policy — shown before ordering. Sourced from the
+              service's actual configured tiers, not hardcoded numbers — an
+              admin change to the policy must be reflected here. */}
           <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3">
             <p className="text-sm font-bold text-red-700 mb-1">Cancellation policy</p>
             <p className="text-xs text-red-800 leading-relaxed">
-              • Free cancellation within 1 hour of booking — 100% refund.<br />
-              • After 1 hour, cancelling refunds only 50% of the amount paid.<br />
-              • Cakes are baked to order, so orders must be placed at least 1 day before delivery.
+              {[...getCancellationPolicyLines(cake), getLeadTimeLine(cake.minLeadDays)]
+                .filter(Boolean)
+                .map((line, idx) => (
+                  <Fragment key={idx}>
+                    • {line}
+                    <br />
+                  </Fragment>
+                ))}
             </p>
           </div>
         </div>
@@ -358,7 +402,7 @@ export default function CakeCustomizerModal({ cake, onClose, onContinue }: Props
           <div>
             <p className="font-extrabold text-ink text-lg leading-none">₹{unitPrice.toLocaleString("en-IN")}</p>
             <p className="text-xs text-muted mt-1">
-              {[flavour, weight, tiersOn ? (tiers === 2 ? "2 tier" : "1 tier") : ""].filter(Boolean).join(" · ")}
+              {[flavour, weight, tiersOn ? (tiers === 2 ? "2 tier" : "1 tier") : "", egglessOn && eggless ? "Eggless" : ""].filter(Boolean).join(" · ")}
               {addonNames.length ? ` · ${addonNames.length} add-on${addonNames.length > 1 ? "s" : ""}` : ""}
             </p>
           </div>

@@ -3,10 +3,12 @@ const normalize = (v: string) =>
 
 const FEET_NAMES = new Set(["feet", "basic feet", "ankle", "above ankle", "mid leg", "below knee"]);
 
-// Feet add-ons that the backend refuses to book on their own (booking.controller.js
+// Add-ons the backend refuses to book on their own (booking.controller.js
 // `mehendiRestrictedFeetOnly`) — they require a hand design in the same booking.
+// "Mehendi for guests" isn't a feet option but shares the same restriction (and
+// is excluded from counting AS a hand design, so it can't satisfy its own rule).
 // Mid Leg / Below Knee are NOT in this set: those can be booked standalone.
-const RESTRICTED_FEET_ONLY_NAMES = new Set(["feet", "basic feet", "ankle", "above ankle"]);
+const RESTRICTED_FEET_ONLY_NAMES = new Set(["feet", "basic feet", "ankle", "above ankle", "mehendi for guests"]);
 
 export const getMehendiPricingKey = (name?: string | null): string | null => {
   const n = normalize(name || "");

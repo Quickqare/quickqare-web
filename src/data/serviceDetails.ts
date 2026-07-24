@@ -118,6 +118,7 @@ const buildMehendiTemplate = (name: string, price: number, desc?: string): Servi
       "Single artist or multi-artist booking support",
       "Choose one hand or both hands at checkout",
       "Organic cone made from natural ingredients",
+      "Book by length now, pick your design later. Choose from our artist's lookbook or share your own design when they arrive.",
       desc || "Bridal and festive mehendi with customizable design length",
     ],
     sections: [
@@ -205,6 +206,29 @@ const buildFallbackTemplate = (name: string, price: number, desc?: string): Serv
   };
 };
 
+const buildCelebrationTemplate = (name: string, price: number, desc?: string): ServiceTemplate => {
+  const base = safePrice(price, 799);
+  return {
+    heroTag: "FESTIVE",
+    heroTitle: `${name} baked fresh for you`,
+    heroSubtitle: `Starts at ₹${base}`,
+    coverTitle: "QuickQare celebration promise",
+    coverSubtitle: "Freshly baked cakes, customized for every occasion",
+    highlights: [
+      "Freshly baked to order by verified local bakers",
+      "Personalize with a custom name on cake and reference photo",
+      "Go big, save big. Perfect for crowds.",
+      desc || "Customizable flavours, tiers and add-ons for every celebration",
+    ],
+    sections: [
+      { key: "popular-picks", title: "Popular picks", options: [
+        { key: "single-tier-cake", title: "Single tier celebration cake", price: base,       duration: "45 mins", description: "Classic single tier cake, freshly baked to order." },
+        { key: "two-tier-cake",    title: "Two tier celebration cake",    price: base + 300, duration: "70 mins", description: "Two tier cake for bigger celebrations." },
+      ]},
+    ],
+  };
+};
+
 export function getServiceTemplate(name: string, price?: number, desc?: string): ServiceTemplate {
   const n = (name || "Service").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const p = safePrice(price, 499);
@@ -212,5 +236,6 @@ export function getServiceTemplate(name: string, price?: number, desc?: string):
   if (n.includes("plumb"))                                     return buildPlumbingTemplate(name, p, desc);
   if (n.includes("elect"))                                     return buildElectricianTemplate(name, p, desc);
   if (n.includes("mehendi") || n.includes("mehndi") || n.includes("henna")) return buildMehendiTemplate(name, p, desc);
+  if (n.includes("celebration") || n.includes("cake"))         return buildCelebrationTemplate(name, p, desc);
   return buildFallbackTemplate(name, p, desc);
 }

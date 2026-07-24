@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import client from "../api/client";
 import { useAppConfig } from "../hooks/useAppConfig";
 import { useAuth } from "../contexts/AuthContext";
 import { getSavedLocation } from "../lib/location";
 import { localDateISO, localDateISOPlusDays } from "../lib/date";
 import { getCartItemTotal, getMehendiPricingKey } from "../utils/mehendiPricing";
+import { getCancellationPolicyLines, getLeadTimeLine } from "../utils/cancellationPolicyText";
 
 export type CakeOptions = {
   flavour: string;
   weight?: string;
   tiers: 1 | 2;
+  eggless?: boolean;
   addons: { name: string; price: number }[];
   nameOnCake: string;
   referencePhotoUrl?: string;
@@ -30,6 +32,13 @@ export type CartItem = {
   options?: CakeOptions;
   // Minimum calendar days between booking and the scheduled date (cakes = 1).
   minLeadDays?: number;
+  // Cancellation policy snapshot from the service — threaded through so this
+  // checkout screen can render the REAL configured policy instead of a
+  // hardcoded guess (see utils/cancellationPolicyText.ts).
+  cancellationPolicyType?: "BEFORE_SERVICE" | "SINCE_BOOKING";
+  sinceBookingTiers?: { maxHoursAfterBooking: number; refundPercent: number }[];
+  cancellationTiers?: { minHoursBefore: number; refundPercent: number }[];
+  cancellationGrace?: { windowMinutes?: number; appliesBelowLeadHours?: number } | null;
 };
 
 type Props = { cart: CartItem[]; onClose: () => void; onSuccess: (bookingId: string) => void };
@@ -58,6 +67,17 @@ export const MAX_MEHENDI_HANDS = 25;
 // a hand-pricing key — either explicitly or derived from its name.
 const isMehendiHandsItem = (item: CartItem): boolean =>
   Boolean(item.pricingKey ?? getMehendiPricingKey(item.name));
+
+// Frontend-only: the 7–8 PM (19:00) slot is hidden for mehendi bookings, to
+// match the mobile app. The static grid below currently stops at 6 PM, so this
+// is a guard that keeps 19:00 hidden for mehendi if evening slots are ever
+// added to TIME_SLOTS.
+const MEHENDI_HIDDEN_SLOT_VALUES = new Set(["19:00"]);
+
+const isMehendiBooking = (items: CartItem[]): boolean =>
+  items.some(
+    (item) => /mehend|mehndi/i.test(String(item.category || "")) || isMehendiHandsItem(item)
+  );
 
 declare const Razorpay: any;
 
@@ -100,6 +120,19 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
   const minLeadDays = cart.reduce((max, item) => Math.max(max, Number(item.minLeadDays) || 0), 0);
   const minDateISO = minLeadDays > 0 ? localDateISOPlusDays(minLeadDays) : localDateISO();
   const hasCakeItems = cart.some((item) => item.options?.flavour);
+  // Cancellation-policy source: mirrors the backend's own rule in
+  // createBooking (booking.controller.js) — the first cart cake declaring
+  // SINCE_BOOKING with real tiers wins (legacy policy); otherwise fall back
+  // to the first cake's BEFORE_SERVICE tiers + grace period (the current
+  // cake policy) — or the platform default if it has none.
+  const cakeItems = cart.filter((item) => item.options?.flavour);
+  const primaryCakeItem =
+    cakeItems.find(
+      (item) =>
+        item.cancellationPolicyType === "SINCE_BOOKING" &&
+        Array.isArray(item.sinceBookingTiers) &&
+        item.sinceBookingTiers.length > 0
+    ) || cakeItems[0];
 
   const [date, setDate] = useState(minDateISO);
   const [time, setTime] = useState("");
@@ -599,7 +632,10 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
                 )}
               </div>
               <div className="grid grid-cols-3 gap-2">
-                {TIME_SLOTS.map((t) => {
+                {(isMehendiBooking(items)
+                  ? TIME_SLOTS.filter((t) => !MEHENDI_HIDDEN_SLOT_VALUES.has(t.value))
+                  : TIME_SLOTS
+                ).map((t) => {
                   const isAvailable = availableSlotTimes === null || availableSlotTimes.includes(t.value);
                   const isSelected = time === t.value;
                   return (
@@ -873,13 +909,22 @@ export default function BookingModal({ cart, onClose, onSuccess }: Props) {
               </div>
             </div>
 
-            {/* Cake cancellation policy — the customer must see this before paying */}
+            {/* Cake cancellation policy — the customer must see this before
+                paying. Sourced from the actual cart item's configured tiers
+                (threaded through from CakeCustomizerModal), not hardcoded
+                numbers — an admin change to the policy must show up here. */}
             {hasCakeItems && (
               <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3">
                 <p className="text-sm font-bold text-red-700 mb-1">Cancellation policy for cake orders</p>
                 <p className="text-xs text-red-800 leading-relaxed">
-                  • Cancel within 1 hour of booking for a full (100%) refund.<br />
-                  • After 1 hour, cancelling refunds only 50% of the amount paid.
+                  {[...getCancellationPolicyLines(primaryCakeItem), getLeadTimeLine(minLeadDays)]
+                    .filter(Boolean)
+                    .map((line, idx) => (
+                      <Fragment key={idx}>
+                        • {line}
+                        <br />
+                      </Fragment>
+                    ))}
                 </p>
               </div>
             )}

@@ -5,7 +5,7 @@ import BookingModal, { CartItem, MAX_MEHENDI_HANDS } from "../components/Booking
 import CakeCustomizerModal from "../components/CakeCustomizerModal";
 import PhotoCarousel from "../components/PhotoCarousel";
 import {
-  getMehendiPricingKey, isMehendiHandOption, isMehendiAddon,
+  getMehendiPricingKey, getMehendiHandsPrice, isMehendiHandOption, isMehendiAddon,
   isRestrictedMehendiFeetOnly, isBridalMehendi, hasMehendiHandInCart, getCartItemTotal,
 } from "../utils/mehendiPricing";
 import { getServiceTemplate } from "../data/serviceDetails";
@@ -53,9 +53,12 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
       : list;
 
   // Hide variant sub-services (Split/Window AC, repair issues) — surfaced nested
-  // inside their base service's picker instead.
+  // inside their base service's picker instead. Inactive services are also
+  // excluded here — the category list now fetches with includeInactive=true
+  // so a "coming soon" category (all services inactive) can still render its
+  // card on the home page, but nothing inactive should be directly bookable.
   const catServices = category
-    ? orderServices(category.services.filter((s) => !isVariantService(s)))
+    ? orderServices(category.services.filter((s) => !isVariantService(s) && s.isActive !== false))
     : [];
 
   const catTemplate = category
@@ -137,11 +140,33 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
   const mehendiQty = (svc: Service): number =>
     mehendiCart.find((i) => i.serviceId === svc._id)?.quantity ?? 0;
 
+  // App-style "number of hands" pricing hint shown on each hand-design card
+  // (mirrors ServiceDetailsScreen's optionMetaText): the tiered per-hand
+  // packages are cheaper than the flat unit price, so surface the discount up
+  // front like the mobile app does. The preview % is computed at 2 hands, the
+  // same quantity the app uses for its preview label. Returns null for feet
+  // add-ons and anything that isn't a per-hand mehendi design.
+  const mehendiHandMeta = (svc: Service): string | null => {
+    const key = getMehendiPricingKey(svc.name);
+    if (!key) return null;
+    const qty = mehendiQty(svc);
+    const previewFinal = getMehendiHandsPrice(key, 2);
+    const previewOriginal = svc.price * 2;
+    const pct =
+      previewFinal !== null && previewOriginal > 0
+        ? Math.round((Math.max(previewOriginal - previewFinal, 0) / previewOriginal) * 100)
+        : 0;
+    if (qty > 0)
+      return `Selected ${qty} hand${qty > 1 ? "s" : ""}${pct > 0 ? ` · ${pct}% OFF` : ""}`;
+    if (pct > 0) return `Up to ${pct}% OFF`;
+    return "Hands package pricing";
+  };
+
   const addMehendiItem = (svc: Service) => {
     setMehendiNotice("");
     if (isRestrictedMehendiFeetOnly(svc.name) && !hasMehendiHandInCart(mehendiCart)) {
       setMehendiNotice(
-        "Add a Mehendi hand design first — Basic Feet, Ankle, and Above Ankle add-ons can only be booked together with one. Mid Leg and Below Knee can be booked separately."
+        "Add a Mehendi hand design first — Guest mehendi, Basic Feet, Ankle, and Above Ankle add-ons can only be booked together with one. Mid Leg and Below Knee can be booked separately."
       );
       return;
     }
@@ -335,7 +360,7 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                         </div>
                       )}
                       {unavailable && (
-                        <div className="absolute top-3 left-3 bg-red-50/95 border border-red-200 text-red-600 text-[10px] font-semibold px-2.5 py-1 rounded-full">
+                        <div className="absolute top-0 left-0 bg-red-50/95 border-r border-b border-red-200 text-red-600 text-[10px] font-semibold px-2.5 py-1 rounded-br-lg">
                           Not available in your area
                         </div>
                       )}
@@ -350,6 +375,13 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                       {svc.description && (
                         <p className="text-[11px] text-muted line-clamp-2 leading-relaxed flex-1 mb-2">{svc.description}</p>
                       )}
+                      {/* App-style hands pricing hint (only on mehendi hand designs) */}
+                      {isMehendiCat && (() => {
+                        const handMeta = mehendiHandMeta(svc);
+                        return handMeta ? (
+                          <p className="text-[10px] font-bold text-primary mb-1.5">{handMeta}</p>
+                        ) : null;
+                      })()}
                       <div className="flex items-center justify-between pt-2 border-t border-border mt-auto">
                         <div>
                           <span className="text-[10px] text-muted">from </span>
@@ -370,8 +402,10 @@ export default function CategoryPage({ onLoginClick }: { onLoginClick: () => voi
                               >
                                 −
                               </button>
-                              <span className="min-w-[1.75rem] text-center text-xs font-bold text-ink">
-                                {mehendiQty(svc)}
+                              <span className="px-1.5 min-w-[1.75rem] text-center text-xs font-bold text-ink whitespace-nowrap">
+                                {isMehendiHandOption(svc.name)
+                                  ? `${mehendiQty(svc)} hand${mehendiQty(svc) > 1 ? "s" : ""}`
+                                  : mehendiQty(svc)}
                               </span>
                               <button
                                 type="button"

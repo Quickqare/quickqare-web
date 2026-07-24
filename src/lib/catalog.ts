@@ -12,6 +12,8 @@ export type ServiceCustomization = {
   weights: CakeWeight[];
   flavours: CakeFlavour[];
   twoTierPriceDelta: number;
+  // Extra charge when the customer picks the eggless option (0 = no extra charge).
+  egglessPriceDelta?: number;
   addons: CakeAddon[];
   nameOnCakeEnabled: boolean;
   // Per-section admin toggles — undefined means enabled (older records).
@@ -21,6 +23,7 @@ export type ServiceCustomization = {
   tiersEnabled?: boolean;
   addonsEnabled?: boolean;
   referencePhotoEnabled?: boolean;
+  egglessOptionEnabled?: boolean;
 };
 
 export type Service = {
@@ -47,6 +50,10 @@ export type Service = {
   isEggless?: boolean;
   cancellationPolicyType?: "BEFORE_SERVICE" | "SINCE_BOOKING";
   sinceBookingTiers?: { maxHoursAfterBooking: number; refundPercent: number }[];
+  cancellationTiers?: { minHoursBefore: number; refundPercent: number }[];
+  // Free-cancel window for orders placed with under appliesBelowLeadHours of
+  // notice (see utils/cancellationPolicyText.getGraceLine).
+  cancellationGrace?: { windowMinutes?: number; appliesBelowLeadHours?: number } | null;
   // Set server-side only for cake/Celebration services, only when the
   // customer's location is known — whether a baker covering their area has
   // declared they can make this specific cake. Undefined = unknown/not
@@ -129,7 +136,7 @@ export function groupIntoCategories(services: Service[]): GroupedCategory[] {
     }
     const g = map.get(id)!;
     g.services.push(s);
-    if (s.price < g.minPrice) g.minPrice = s.price;
+    if (s.isActive !== false && s.price < g.minPrice) g.minPrice = s.price;
   }
   return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -148,6 +155,7 @@ export function useServices() {
     const fetchServices = () => {
       const loc = getSavedLocation();
       const params = new URLSearchParams();
+      params.set("includeInactive", "true");
       if (loc?.pincode) params.set("pincode", loc.pincode);
       if (loc?.latitude) params.set("lat", String(loc.latitude));
       if (loc?.longitude) params.set("lng", String(loc.longitude));

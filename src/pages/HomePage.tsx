@@ -321,8 +321,9 @@ export default function HomePage({ onLoginClick }: Props) {
         cat.services
           .filter(
             (s) =>
-              s.name.toLowerCase().includes(q) ||
-              (s.description ?? "").toLowerCase().includes(q)
+              s.isActive !== false &&
+              (s.name.toLowerCase().includes(q) ||
+                (s.description ?? "").toLowerCase().includes(q))
           )
           .map((svc) => ({ svc, cat }))
       )
@@ -340,7 +341,7 @@ export default function HomePage({ onLoginClick }: Props) {
     ? []
     : categories
         .flatMap((cat) => cat.services.map((svc) => ({ svc, cat })))
-        .filter(({ svc }) => svc.isHighlighted)
+        .filter(({ svc }) => svc.isHighlighted && svc.isActive !== false)
         .sort(
           (a, b) =>
             (a.svc.highlightOrder ?? 0) - (b.svc.highlightOrder ?? 0) ||
@@ -348,13 +349,38 @@ export default function HomePage({ onLoginClick }: Props) {
         )
         .slice(0, HIGHLIGHTS_MAX);
 
-  // Each category opens its own page.
-  const openCategory = (cat: GroupedCategory) => navigate(`/category/${toUrlSlug(cat)}`);
+  // A category with services but none of them active yet — mirrors the app's
+  // isServiceAvailableNow check, just applied across the whole category
+  // instead of a single matched service.
+  const isCategoryComingSoon = (cat: GroupedCategory) =>
+    cat.services.length > 0 && cat.services.every((s) => s.isActive === false);
+
+  // Each category opens its own page — unless nothing in it is bookable yet,
+  // matching the app's "Coming Soon" alert instead of opening an empty page.
+  const openCategory = (cat: GroupedCategory) => {
+    if (isCategoryComingSoon(cat)) {
+      window.alert(`${cat.name} will be available soon in your area.`);
+      return;
+    }
+    navigate(`/category/${toUrlSlug(cat)}`);
+  };
 
   // A service result deep-links into its category page, which scrolls to the
   // service card (or opens the variant picker for nested options).
   const openService = (svc: Service, cat: GroupedCategory) =>
     navigate(`/category/${toUrlSlug(cat)}?service=${svc._id}`);
+
+  // Admin banner click target — the admin-chosen service (deep-links into its
+  // category page like a search result), when it exists and is bookable.
+  // Banners without one fall back to their external Link URL.
+  const bannerServiceTarget = (b: any): { svc: Service; cat: GroupedCategory } | undefined => {
+    if (!b?.serviceId) return undefined;
+    for (const cat of categories) {
+      const svc = cat.services.find((s) => s._id === b.serviceId);
+      if (svc && svc.isActive !== false) return { svc, cat };
+    }
+    return undefined;
+  };
 
   return (
     <>
@@ -445,15 +471,25 @@ export default function HomePage({ onLoginClick }: Props) {
                     )}
                   </>
                 );
-                // A banner with an unsafe link (e.g. `javascript:`) still shows its
+                // Admin-chosen service target wins; else the Link URL. A banner
+                // with an unsafe link (e.g. `javascript:`) still shows its
                 // artwork — it just isn't clickable.
+                const svcTarget = bannerServiceTarget(b);
                 const href = safeExternalUrl(b.linkUrl);
                 return (
                   <div
                     key={b._id}
                     className={`absolute inset-0 transition-opacity duration-700 ${i === bannerIndex ? "opacity-100" : "opacity-0"}`}
                   >
-                    {href ? (
+                    {svcTarget ? (
+                      <button
+                        type="button"
+                        onClick={() => openService(svcTarget.svc, svcTarget.cat)}
+                        className="block w-full h-full text-left"
+                      >
+                        {inner}
+                      </button>
+                    ) : href ? (
                       <a href={href} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
                         {inner}
                       </a>
@@ -789,28 +825,24 @@ export default function HomePage({ onLoginClick }: Props) {
                       </div>
                     )}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent"/>
-                    {index < 2 && (
-                      <div className="absolute top-2 left-2 bg-primary text-white text-[9px] font-bold px-2 py-0.5 rounded-full tracking-wide uppercase">
+                    {isCategoryComingSoon(cat) ? (
+                      <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-sm text-ink text-[9px] font-bold px-2 py-0.5 rounded-full tracking-wide uppercase">
+                        Coming Soon
+                      </div>
+                    ) : index < 2 && (
+                      /* Bare green word in the corner — no pill; drop-shadow keeps
+                         it readable over light photos. */
+                      <div className="absolute top-2 right-2 text-primary text-[9px] font-bold tracking-wide uppercase drop-shadow-[0_1px_2px_rgba(255,255,255,0.8)]">
                         Popular
                       </div>
                     )}
-                    <div className="absolute top-2 right-2 bg-black/40 backdrop-blur-sm text-white text-[9px] font-semibold px-2 py-0.5 rounded-full">
-                      {cat.services.length} service{cat.services.length !== 1 ? "s" : ""}
-                    </div>
-                    <div className="absolute bottom-2 left-2.5 right-2.5 flex items-end justify-between">
-                      <div>
-                        <p className="text-white font-extrabold text-[13px] tracking-tight leading-tight capitalize drop-shadow-sm">
-                          {cat.name}
-                        </p>
-                        <p className="text-white/70 text-[10px] mt-0.5">
-                          from ₹{cat.minPrice === Infinity ? "—" : cat.minPrice}
-                        </p>
-                      </div>
-                      <div className="w-5 h-5 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center group-hover:bg-white/40 transition-colors">
-                        <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7"/>
-                        </svg>
-                      </div>
+                    <div className="absolute bottom-2 left-2.5 right-2.5">
+                      <p className="text-white font-extrabold text-[13px] tracking-tight leading-tight capitalize drop-shadow-sm">
+                        {cat.name}
+                      </p>
+                      <p className="text-white/70 text-[10px] mt-0.5">
+                        from ₹{cat.minPrice === Infinity ? "—" : cat.minPrice}
+                      </p>
                     </div>
                   </div>
                 </button>
@@ -848,9 +880,6 @@ export default function HomePage({ onLoginClick }: Props) {
                             <CategoryIcon slug={cat.slug} size={40} color="#D1D5DB" />
                           </div>
                         )}
-                        <span className="absolute top-2 left-2 bg-black/50 backdrop-blur-sm text-white text-[9px] font-bold px-2 py-0.5 rounded-full capitalize">
-                          {cat.name}
-                        </span>
                       </div>
                       <div className="p-2.5">
                         <p className="font-bold text-ink text-[12px] tracking-tight leading-snug line-clamp-2 mb-1 min-h-[2.4em]">

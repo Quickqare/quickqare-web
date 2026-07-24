@@ -42,12 +42,13 @@ const SOCIAL_ICON_MAP: Record<
   youtube:   { Icon: YouTubeIcon,   label: "YouTube" },
 };
 
+const LINK_CLASS = "text-sm text-white/55 hover:text-white transition-colors";
+
 // Site-wide footer — rendered once in App.tsx (sibling to <Routes>) so every
-// page gets it. Previously lived only inline inside HomePage, so every other
-// page (bookings, profile, complaints, referral, policies…) had no footer at
-// all. A separate, unused, differently-styled Footer.tsx also existed —
-// dead code from before the inline version replaced it — this file now
-// supersedes both with the one actually shown to customers.
+// page gets it. Dark/green treatment deliberately mirrors the Navbar instead
+// of the light-gray, black-icon look most "About/Careers/Social" footers
+// default to (Urban Company's, for one) — same job, a QuickQare-branded shell
+// around it instead of a generic one.
 export default function Footer() {
   const { socialLinks } = useAppConfig();
   // An icon whose configured URL isn't a safe http(s) link is dropped rather
@@ -59,34 +60,79 @@ export default function Footer() {
     });
 
   return (
-    <div className="border-t border-border py-6 px-4 mt-8">
-      <div className="max-w-6xl mx-auto flex flex-col gap-4">
-        {activeSocialLinks.length > 0 && (
-          <div className="flex items-center justify-center md:justify-start gap-3">
-            {activeSocialLinks.map(({ key, url, Icon, label }) => (
-              <a
-                key={key}
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={label}
-                title={label}
-                className="w-9 h-9 rounded-full border border-border flex items-center justify-center text-muted hover:text-ink hover:border-ink transition"
-              >
-                <Icon size={16} color="currentColor" />
-              </a>
-            ))}
+    <footer className="bg-ink mt-16">
+      <div className="max-w-6xl mx-auto px-4 pt-14 pb-8">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-x-6 gap-y-10">
+          {/* Brand */}
+          <div className="col-span-2 md:col-span-1">
+            <Link to="/" className="flex items-center gap-2 text-white font-extrabold text-lg tracking-tight">
+              <span className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white text-sm font-bold">Q</span>
+              QuickQare
+            </Link>
+            <p className="mt-3 text-sm text-white/45 leading-relaxed max-w-[240px]">
+              Trusted home services — AC care, mehendi, celebrations & more, booked in minutes.
+            </p>
           </div>
-        )}
-        <div className="flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-muted">
-          <span>© {new Date().getFullYear()} QuickQare. All rights reserved.</span>
-          <div className="flex items-center gap-5">
-            <Link to="/privacy-policy" className="hover:text-ink transition-colors">Privacy Policy</Link>
-            <Link to="/terms" className="hover:text-ink transition-colors">Terms & Conditions</Link>
-            <Link to="/refund-policy" className="hover:text-ink transition-colors">Refund Policy</Link>
+
+          {/* Company */}
+          <div>
+            <h3 className="text-white font-semibold text-sm mb-4">Company</h3>
+            <ul className="space-y-3">
+              <li><Link to="/terms" className={LINK_CLASS}>Terms &amp; Conditions</Link></li>
+              <li><Link to="/privacy-policy" className={LINK_CLASS}>Privacy Policy</Link></li>
+              <li><Link to="/refund-policy" className={LINK_CLASS}>Refund Policy</Link></li>
+              <li><Link to="/anti-discrimination-policy" className={LINK_CLASS}>Anti-discrimination Policy</Link></li>
+            </ul>
           </div>
+
+          {/* For customers */}
+          <div>
+            <h3 className="text-white font-semibold text-sm mb-4">For customers</h3>
+            <ul className="space-y-3">
+              <li><Link to="/" className={LINK_CLASS}>Browse services</Link></li>
+              <li><Link to="/bookings" className={LINK_CLASS}>My bookings</Link></li>
+              <li><Link to="/referral" className={LINK_CLASS}>Refer &amp; earn</Link></li>
+              <li><Link to="/contact-us" className={LINK_CLASS}>Contact us</Link></li>
+            </ul>
+          </div>
+
+          {/* For professionals */}
+          <div>
+            <h3 className="text-white font-semibold text-sm mb-4">For professionals</h3>
+            <ul className="space-y-3">
+              <li><Link to="/register-professional" className={LINK_CLASS}>Register as a professional</Link></li>
+            </ul>
+          </div>
+
+          {/* Social */}
+          {activeSocialLinks.length > 0 && (
+            <div>
+              <h3 className="text-white font-semibold text-sm mb-4">Follow us</h3>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {activeSocialLinks.map(({ key, url, Icon, label }) => (
+                  <a
+                    key={key}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={label}
+                    title={label}
+                    className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-white/60 hover:text-primary hover:bg-primary/10 transition"
+                  >
+                    <Icon size={16} color="currentColor" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-12 pt-6 border-t border-white/10 text-center md:text-left">
+          <span className="text-xs text-white/35">
+            © {new Date().getFullYear()} QuickQare. All rights reserved.
+          </span>
         </div>
       </div>
-    </div>
+    </footer>
   );
 }

@@ -29,6 +29,7 @@ type Booking = {
   estimateStatus?: "none" | "pending" | "approved" | "rejected";
   estimateItems?: { name: string; price: number; quantity: number }[];
   estimateTotal?: number;
+  estimatePayment?: { status?: "NONE" | "PENDING" | "PAID" | "FAILED" };
   etaMinutes?: number;
   cancelledBy?: string;
   cancelReason?: string;
@@ -37,6 +38,17 @@ type Booking = {
   payment?: { status: string };
   rescheduleReason?: string;
   partnerReportedIssue?: string | null;
+  createdAt?: string;
+  scheduledStartAt?: string;
+  // Refund-policy snapshot taken at booking creation — used to preview the
+  // refund % a cancel would land on (mirrors the backend's calculateRefund).
+  cancellationTiersSnapshot?: { minHoursBefore: number; refundPercent: number }[];
+  // Legacy cake orders refund by time since booking, not time to service
+  cancellationPolicyTypeSnapshot?: "BEFORE_SERVICE" | "SINCE_BOOKING";
+  sinceBookingTiersSnapshot?: { maxHoursAfterBooking: number; refundPercent: number }[];
+  // Grace-period free-cancel deadline (last-minute orders) — cancelling at or
+  // before this instant refunds 100% regardless of tier.
+  freeCancelUntil?: string | null;
 };
 
 const STATUS_STEPS: { status: BookingStatus; label: string; icon: string }[] = [
@@ -72,7 +84,15 @@ export default function BookingStatusPage() {
   const [error, setError] = useState("");
   const [cancelState, setCancelState] = useState<"idle" | "confirming" | "cancelling">("idle");
   const [showEstimate, setShowEstimate] = useState(false);
-  const [estimateAction, setEstimateAction] = useState<"approving" | "rejecting" | null>(null);
+  const [estimateAction, setEstimateAction] = useState<"approving" | "rejecting" | "paying" | null>(null);
+  // Fee-inclusive estimate detail (payable total + paymentStatus), loaded from
+  // GET /estimate when the modal opens — the booking payload only carries the
+  // parts subtotal, not fees/GST or the payment state.
+  const [estimateDetail, setEstimateDetail] = useState<{
+    totalAmount: number;
+    paymentStatus: "NONE" | "PENDING" | "PAID" | "FAILED";
+    status: "none" | "pending" | "approved" | "rejected";
+  } | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [rescheduling, setRescheduling] = useState(false);
@@ -127,13 +147,91 @@ export default function BookingStatusPage() {
     return () => { socket.disconnect(); };
   }, [user?._id, bookingId]);
 
-  const handleEstimateRespond = async (approved: boolean) => {
-    setEstimateAction(approved ? "approving" : "rejecting");
+  // Load the fee-inclusive estimate detail (payable total + payment state) when
+  // the modal opens. Falls back silently to the booking's parts subtotal.
+  const openEstimate = async () => {
+    setShowEstimate(true);
     try {
-      await client.post(`/api/booking/${bookingId}/estimate/respond`, { approved });
-      setBooking((prev) => prev ? { ...prev, estimateStatus: approved ? "approved" : "rejected" } : prev);
+      const res = await client.get(`/api/booking/${bookingId}/estimate`);
+      const e = res.data?.estimate;
+      if (e) {
+        setEstimateDetail({
+          totalAmount: Number(e.totalAmount || 0),
+          paymentStatus: e.paymentStatus || "NONE",
+          status: e.status || "pending",
+        });
+      }
+    } catch { /* keep the subtotal fallback from the booking payload */ }
+  };
+
+  const handleRejectEstimate = async () => {
+    setEstimateAction("rejecting");
+    try {
+      await client.post(`/api/booking/${bookingId}/estimate/respond`, { approved: false });
+      setBooking((prev) => prev ? { ...prev, estimateStatus: "rejected" } : prev);
       setShowEstimate(false);
     } catch { } finally {
+      setEstimateAction(null);
+    }
+  };
+
+  // Approve (if still pending) then pay for the estimate: same order → Razorpay
+  // → verify sequence as a normal booking, against the estimate endpoints. The
+  // technician is only credited for the extra work once this reaches PAID.
+  const handleApproveAndPayEstimate = async () => {
+    if (typeof (window as any).Razorpay === "undefined") {
+      setError("Couldn't load the payment window. Disable any ad blocker for this site and try again.");
+      return;
+    }
+
+    setEstimateAction("paying");
+    try {
+      // Approve only if it hasn't been approved already (a retry after a dropped
+      // checkout is already "approved" — respond would 409 then).
+      const alreadyApproved =
+        estimateDetail?.status === "approved" || booking?.estimateStatus === "approved";
+      if (!alreadyApproved) {
+        await client.post(`/api/booking/${bookingId}/estimate/respond`, { approved: true });
+        setBooking((prev) => prev ? { ...prev, estimateStatus: "approved" } : prev);
+      }
+
+      const orderRes = await client.post(`/api/booking/${bookingId}/estimate/create-order`);
+      if (!orderRes.data?.success) throw new Error(orderRes.data?.message || "Payment order failed");
+      const { order } = orderRes.data;
+
+      const rzp = new (window as any).Razorpay({
+        key: order.key_id,
+        amount: order.amount,
+        currency: order.currency || "INR",
+        order_id: order.id,
+        name: "QuickQare",
+        description: "Additional parts / service",
+        theme: { color: "#22A06B" },
+        handler: async (response: any) => {
+          try {
+            await client.post(`/api/booking/${bookingId}/estimate/verify`, {
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            setEstimateDetail((prev) => prev ? { ...prev, paymentStatus: "PAID" } : prev);
+            setBooking((prev) =>
+              prev ? { ...prev, estimatePayment: { status: "PAID" } } : prev
+            );
+            setShowEstimate(false);
+          } catch {
+            setError("Payment verification failed. Please contact support.");
+          } finally {
+            setEstimateAction(null);
+          }
+        },
+        modal: {
+          ondismiss: () => setEstimateAction(null),
+        },
+      });
+      rzp.open();
+    } catch (e: any) {
+      setError(e.response?.data?.message ?? e.message ?? "Could not start payment. Try again.");
       setEstimateAction(null);
     }
   };
@@ -359,14 +457,26 @@ export default function BookingStatusPage() {
           </div>
         )}
 
-        {/* Estimate pending alert */}
-        {booking.estimateStatus === "pending" && (
+        {/* Estimate alert — pending review, or approved but not yet paid */}
+        {(booking.estimateStatus === "pending" ||
+          (booking.estimateStatus === "approved" &&
+            booking.estimatePayment?.status !== "PAID" &&
+            (booking.estimateItems?.length ?? 0) > 0)) && (
           <button
-            onClick={() => setShowEstimate(true)}
+            onClick={openEstimate}
             className="mt-3 w-full bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 text-left"
           >
-            <p className="text-sm font-bold text-amber-700">⚠️ Estimate Pending Approval</p>
-            <p className="text-xs text-amber-600 mt-0.5">Your partner submitted an estimate. Tap to review →</p>
+            {booking.estimateStatus === "approved" ? (
+              <>
+                <p className="text-sm font-bold text-amber-700">💳 Estimate Awaiting Payment</p>
+                <p className="text-xs text-amber-600 mt-0.5">You approved the extra work. Tap to complete payment →</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-bold text-amber-700">⚠️ Estimate Pending Approval</p>
+                <p className="text-xs text-amber-600 mt-0.5">Your partner submitted an estimate. Tap to review →</p>
+              </>
+            )}
           </button>
         )}
       </div>
@@ -523,9 +633,50 @@ export default function BookingStatusPage() {
               <div className="card p-4 border-red-200">
                 <p className="text-sm font-semibold text-red-700 mb-1">Cancel this booking?</p>
                 <p className="text-xs text-muted mb-3">
-                  {booking.status === "ARRIVED"
-                    ? "Your professional has already reached your location — no refund applies if you cancel now."
-                    : "Refund depends on how far ahead you cancel (100% if >24h before service)."}
+                  {(() => {
+                    if (booking.status === "ARRIVED") {
+                      return "Your professional has already reached your location — no refund applies if you cancel now.";
+                    }
+                    // Grace window (backend freeCancelUntil): last-minute
+                    // orders get a short free-cancel window from booking
+                    // regardless of the tier they'd otherwise land in.
+                    if (booking.freeCancelUntil && Date.now() <= new Date(booking.freeCancelUntil).getTime()) {
+                      const until = new Date(booking.freeCancelUntil);
+                      return `You're within your free-cancellation window (until ${until.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}) — you'll receive a 100% refund.`;
+                    }
+                    // Legacy cake orders: refund keyed on time since booking.
+                    const sinceTiers = booking.sinceBookingTiersSnapshot;
+                    if (booking.cancellationPolicyTypeSnapshot === "SINCE_BOOKING" && sinceTiers?.length && booking.createdAt) {
+                      const first = sinceTiers[0];
+                      const lastPercent = sinceTiers[sinceTiers.length - 1]?.refundPercent ?? 50;
+                      const hoursSinceBooking = (Date.now() - new Date(booking.createdAt).getTime()) / 36e5;
+                      return hoursSinceBooking <= first.maxHoursAfterBooking
+                        ? `You're within ${first.maxHoursAfterBooking}h of booking — you'll receive a ${first.refundPercent}% refund.`
+                        : `More than ${first.maxHoursAfterBooking}h have passed since booking — only ${lastPercent}% will be refunded.`;
+                    }
+                    // Preview the refund % this cancel lands on from the
+                    // booking's tier snapshot (same rule as the backend's
+                    // calculateRefund, including its default tiers).
+                    const tiers = booking.cancellationTiersSnapshot?.length
+                      ? booking.cancellationTiersSnapshot
+                      : [
+                          { minHoursBefore: 24, refundPercent: 100 },
+                          { minHoursBefore: 4, refundPercent: 75 },
+                          { minHoursBefore: 1, refundPercent: 50 },
+                          { minHoursBefore: 0, refundPercent: 25 },
+                        ];
+                    const startAt = booking.scheduledStartAt ? new Date(booking.scheduledStartAt).getTime() : NaN;
+                    if (Number.isFinite(startAt)) {
+                      const hoursToService = (startAt - Date.now()) / 36e5;
+                      const tier = [...tiers]
+                        .sort((a, b) => b.minHoursBefore - a.minHoursBefore)
+                        .find((t) => hoursToService >= t.minHoursBefore);
+                      if (tier) {
+                        return `Cancelling now refunds ${tier.refundPercent}% of the amount paid.`;
+                      }
+                    }
+                    return "Refund depends on how far ahead you cancel.";
+                  })()}
                 </p>
                 <div className="flex gap-2">
                   <button onClick={booking.status === "ARRIVED" ? handleCancelArrived : handleCancel} className="px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition">
@@ -563,26 +714,47 @@ export default function BookingStatusPage() {
                 </div>
               ))}
               <div className="flex justify-between font-bold text-ink border-t border-border pt-2 mt-2">
-                <span>Total</span>
-                <span className="text-primary">₹{booking.estimateTotal?.toLocaleString("en-IN")}</span>
+                <span>Total Payable</span>
+                <span className="text-primary">
+                  ₹{(estimateDetail?.totalAmount ?? booking.estimateTotal ?? 0).toLocaleString("en-IN")}
+                </span>
               </div>
+              {estimateDetail && estimateDetail.totalAmount > (booking.estimateTotal ?? 0) && (
+                <p className="text-[11px] text-muted text-right">Includes platform fee &amp; GST</p>
+              )}
             </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => handleEstimateRespond(true)}
-                disabled={!!estimateAction}
-                className="flex-1 btn-primary disabled:opacity-50"
-              >
-                {estimateAction === "approving" ? "Approving…" : "Approve"}
-              </button>
-              <button
-                onClick={() => handleEstimateRespond(false)}
-                disabled={!!estimateAction}
-                className="flex-1 border border-red-300 text-red-600 rounded-xl py-2.5 font-semibold text-sm hover:bg-red-50 transition disabled:opacity-50"
-              >
-                {estimateAction === "rejecting" ? "Rejecting…" : "Reject"}
-              </button>
-            </div>
+
+            {estimateDetail?.paymentStatus === "PAID" ? (
+              <p className="text-center text-sm font-bold text-green-600 py-2">
+                ✓ Paid — your technician can continue the work.
+              </p>
+            ) : (
+              <>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleApproveAndPayEstimate}
+                    disabled={!!estimateAction}
+                    className="flex-1 btn-primary disabled:opacity-50"
+                  >
+                    {estimateAction === "paying"
+                      ? "Processing…"
+                      : `Approve & Pay ₹${(estimateDetail?.totalAmount ?? booking.estimateTotal ?? 0).toLocaleString("en-IN")}`}
+                  </button>
+                  {/* Reject is only possible while still pending — once approved the
+                      backend won't reverse it (it may already be paid). */}
+                  {booking.estimateStatus === "pending" && estimateDetail?.status !== "approved" && (
+                    <button
+                      onClick={handleRejectEstimate}
+                      disabled={!!estimateAction}
+                      className="flex-1 border border-red-300 text-red-600 rounded-xl py-2.5 font-semibold text-sm hover:bg-red-50 transition disabled:opacity-50"
+                    >
+                      {estimateAction === "rejecting" ? "Rejecting…" : "Reject"}
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted text-center mt-3">🔒 Secured by Razorpay</p>
+              </>
+            )}
           </div>
         </div>
       )}

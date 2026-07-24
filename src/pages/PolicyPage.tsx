@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useLocation, Link } from "react-router-dom";
 import client from "../api/client";
 
-type PolicyType = "privacy" | "terms" | "refund";
+type PolicyType = "privacy" | "terms" | "refund" | "anti_discrimination";
 
 const POLICY_META: Record<PolicyType, { title: string; description: string }> = {
   privacy: {
@@ -17,9 +17,21 @@ const POLICY_META: Record<PolicyType, { title: string; description: string }> = 
     title: "Cancellation & Refund Policy",
     description: "Conditions under which cancellations and refunds are processed.",
   },
+  anti_discrimination: {
+    title: "Anti-discrimination Policy",
+    description: "Our commitment to a platform free of discrimination for customers and partners.",
+  },
+};
+
+const POLICY_PATH: Record<PolicyType, string> = {
+  privacy: "privacy-policy",
+  terms: "terms",
+  refund: "refund-policy",
+  anti_discrimination: "anti-discrimination-policy",
 };
 
 function policyTypeFromPath(path: string): PolicyType {
+  if (path.includes("anti-discrimination")) return "anti_discrimination";
   if (path.includes("terms")) return "terms";
   if (path.includes("refund")) return "refund";
   return "privacy";
@@ -83,12 +95,12 @@ export default function PolicyPage() {
 
       {/* Footer links */}
       <div className="mt-8 flex flex-wrap gap-4 text-sm text-muted">
-        {(["privacy", "terms", "refund"] as PolicyType[])
+        {(["privacy", "terms", "refund", "anti_discrimination"] as PolicyType[])
           .filter((t) => t !== policyType)
           .map((t) => (
             <Link
               key={t}
-              to={`/${t === "privacy" ? "privacy-policy" : t === "terms" ? "terms" : "refund-policy"}`}
+              to={`/${POLICY_PATH[t]}`}
               className="hover:text-primary transition-colors underline underline-offset-2"
             >
               {POLICY_META[t].title}
