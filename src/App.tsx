@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { Routes, Route, Navigate, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "./contexts/AuthContext";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
@@ -16,6 +16,34 @@ import LoginModal from "./components/LoginModal";
 import RatingModal from "./components/RatingModal";
 import CategoryPage from "./pages/CategoryPage";
 import client from "./api/client";
+
+// Gate for authenticated routes. A logged-out visitor who reaches one — e.g.
+// via the footer's "My bookings" or "Refer & earn" links — used to be silently
+// redirected to home, so the link appeared to do nothing. Instead we open the
+// login modal and HOLD them on this route: because we never navigate away, a
+// successful login (which sets `user` in context) re-renders straight into the
+// page they asked for, with no destination lost.
+function RequireAuth({ onLoginClick, children }: { onLoginClick: () => void; children: ReactNode }) {
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (!user) onLoginClick();
+  }, [user, onLoginClick]);
+
+  if (user) return <>{children}</>;
+
+  return (
+    <div className="max-w-md mx-auto px-4 py-24 text-center">
+      <p className="text-5xl mb-4">🔒</p>
+      <h1 className="text-xl font-bold text-ink mb-1">Please log in</h1>
+      <p className="text-muted text-sm mb-6">Log in with your phone to view this page.</p>
+      <button className="btn-primary" onClick={onLoginClick}>Log in</button>
+      <div className="mt-4">
+        <Link to="/" className="text-sm text-primary hover:underline">Back to home</Link>
+      </div>
+    </div>
+  );
+}
 
 function AppInner() {
   const { user, loading } = useAuth();
@@ -37,6 +65,9 @@ function AppInner() {
     checkPendingRating();
   }, [checkPendingRating]);
 
+  // Stable so RequireAuth's effect doesn't re-fire the modal on every render.
+  const openLogin = useCallback(() => setShowLogin(true), []);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center">
@@ -45,8 +76,9 @@ function AppInner() {
     );
   }
 
-  const requireAuth = (el: ReactNode) =>
-    user ? el : <Navigate to="/" replace />;
+  const requireAuth = (el: ReactNode) => (
+    <RequireAuth onLoginClick={openLogin}>{el}</RequireAuth>
+  );
 
   return (
     <>
